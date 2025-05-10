@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js Portfolio</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+            background-color: #000;
+            color: #fff;
+            font-family: 'Arial', sans-serif;
+        }
+        
+        canvas {
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: -1;
+        }
+        
+        .content {
+            position: relative;
+            width: 100%;
+            height: 500vh; /* Make it scrollable */
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        
+        .section {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 0 15%;
+        }
+        
+        h1, h2, h3 {
+            color: #ffffff;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+        }
+        
+        .section-content {
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 30px;
+            border-radius: 8px;
+            max-width: 800px;
+        }
+    </style>
+</head>
+<body>
+    <div class="content">
+        <section class="section" id="section1">
+            <div class="section-content">
+                <h1>Welcome to My Portfolio</h1>
+                <p>Scroll down to navigate through the 3D space</p>
+            </div>
+        </section>
+        
+        <section class="section" id="section2">
+            <div class="section-content">
+                <h2>About Me</h2>
+                <p>This is a Three.js powered portfolio showcasing my work and expertise.</p>
+            </div>
+        </section>
+        
+        <section class="section" id="section3">
+            <div class="section-content">
+                <h2>Projects</h2>
+                <p>These are some of the projects I've worked on.</p>
+            </div>
+        </section>
+        
+        <section class="section" id="section4">
+            <div class="section-content">
+                <h2>Contact</h2>
+                <p>Feel free to reach out if you'd like to work together!</p>
+            </div>
+        </section>
+        
+        <section class="section" id="section5">
+            <div class="section-content">
+                <h2>Thank You</h2>
+                <p>Thanks for visiting my portfolio!</p>
+            </div>
+        </section>
+    </div>
+
+    <!-- Three.js libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    
+    <script>
+        // Main Three.js setup
+        let scene, camera, renderer;
+        let cone; // Player object (cone)
+        let cubes = []; // Array for colored cubes
+        let scrollY = 0; // Track scroll position
+        const MAX_SCROLL = document.body.scrollHeight;
+        
+        // Initialize scene
+        function init() {
+            // Create scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x050505);
+            
+            // Create camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 2, 10);
+            camera.lookAt(0, 0, 0);
+            
+            // Create renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+            
+            // Create lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(1, 1, 1);
+            scene.add(directionalLight);
+            
+            // Create ground plane
+            const planeGeometry = new THREE.PlaneGeometry(100, 1000);
+            const planeMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x333333,
+                side: THREE.DoubleSide,
+                roughness: 0.8
+            });
+            const plane = new THREE.Mesh(planeGeometry, planeMaterial);
+            plane.rotation.x = -Math.PI / 2; // Rotate to make it horizontal
+            plane.position.y = -1;
+            scene.add(plane);
+            
+            // Create player object (cone)
+            const coneGeometry = new THREE.ConeGeometry(0.5, 1, 16);
+            const coneMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+            cone = new THREE.Mesh(coneGeometry, coneMaterial);
+            cone.position.set(0, 0, 0);
+            cone.rotation.x = Math.PI; // Pointing forward
+            scene.add(cone);
+            
+            // Create random cubes along the path
+            createCubes();
+            
+            // Add event listeners
+            window.addEventListener('resize', onWindowResize);
+            window.addEventListener('scroll', onScroll);
+            
+            // Start animation
+            animate();
+        }
+        
+        // Create randomly positioned colored cubes
+        function createCubes() {
+            // Clear existing cubes
+            cubes.forEach(cube => scene.remove(cube));
+            cubes = [];
+            
+            // Create new cubes
+            const colors = [0x00ff00, 0xff00ff, 0x00ffff, 0xffff00, 0xff8000, 0x8000ff];
+            
+            for (let i = 0; i < 100; i++) {
+                const size = Math.random() * 0.5 + 0.2;
+                const geometry = new THREE.BoxGeometry(size, size, size);
+                const material = new THREE.MeshStandardMaterial({ 
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    roughness: 0.7
+                });
+                
+                const cube = new THREE.Mesh(geometry, material);
+                
+                // Position randomly but along the path
+                cube.position.x = Math.random() * 10 - 5; // Between -5 and 5
+                cube.position.y = Math.random() * 3; // Between 0 and 3
+                cube.position.z = -i * 5; // Spaced out along the path
+                
+                // Random rotation
+                cube.rotation.x = Math.random() * Math.PI;
+                cube.rotation.y = Math.random() * Math.PI;
+                
+                scene.add(cube);
+                cubes.push(cube);
+            }
+        }
+        
+        // Handle window resizing
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        // Handle scrolling to move the player through the scene
+        function onScroll() {
+            scrollY = window.scrollY;
+        }
+        
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Calculate progress (0 to 1) based on scroll position
+            const scrollMax = document.body.scrollHeight - window.innerHeight;
+            const progress = Math.min(scrollY / scrollMax, 1);
+            
+            // Move cone (player) based on scroll
+            cone.position.z = -progress * 490; // Move from 0 to -490
+            
+            // Move camera to follow the cone with some offset
+            camera.position.z = cone.position.z + 10;
+            
+            // Animate cubes
+            cubes.forEach(cube => {
+                cube.rotation.x += 0.01;
+                cube.rotation.y += 0.01;
+            });
+            
+            renderer.render(scene, camera);
+        }
+        
+        // Initialize the scene when the page loads
+        window.onload = init;
+    </script>
+</body>
+</html>
