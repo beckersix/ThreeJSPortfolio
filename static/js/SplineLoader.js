@@ -28,7 +28,6 @@ SplineLoader.prototype.loadOBJModel = function(url, callback) {
         this.objLoader = new THREE.OBJLoader();
     }
     this.objLoader.load(url, function(object) {
-        // Before adding to scene, apply materials with different colors but same properties as cubes
         // Define a set of vibrant colors to use for objects
         const colors = [
             0x00ffcc, // Original cube color
@@ -45,11 +44,17 @@ SplineLoader.prototype.loadOBJModel = function(url, callback) {
         
         let colorIndex = 0;
         
-        // Recursively traverse the object tree and apply materials
-        function applyMaterials(obj) {
-            // Skip the camera path object as it should remain invisible
+        // Store for instanced meshes
+        self.instancedMeshes = [];
+        
+        // Map to collect similar geometries for instancing
+        const geometryMap = new Map();
+        
+        // First pass: collect all geometries and count instances
+        function collectGeometries(obj) {
+            // Skip the camera path object
             if (obj.name === 'camera_path') {
-                obj.visible = false; // Hide camera path
+                obj.visible = false;
                 return;
             }
             
@@ -61,52 +66,149 @@ SplineLoader.prototype.loadOBJModel = function(url, callback) {
                 obj.name.toLowerCase().includes('street')
             );
             
-            // Only apply material to meshes with geometry
+            // Only process meshes with geometry
             if (obj.type === 'Mesh' && obj.geometry) {
-                let material;
+                // Create a key based on geometry properties
+                // This helps identify similar geometries for instancing
+                const vertexCount = obj.geometry.attributes.position.count;
+                const geoKey = `${obj.geometry.type}_${vertexCount}_${isRoad ? 'road' : 'object'}`;
                 
-                if (isRoad) {
-                    // Apply rough black material for the road
+                // Get or create entry in geometry map
+                if (!geometryMap.has(geoKey)) {
+                    geometryMap.set(geoKey, {
+                        geometry: obj.geometry,
+                        isRoad: isRoad,
+                        instances: [],
+                        originalObjects: []
+                    });
+                }
+                
+                // Store instance data
+                const entry = geometryMap.get(geoKey);
+                entry.instances.push({
+                    position: obj.position.clone(),
+                    rotation: obj.rotation.clone(),
+                    scale: obj.scale.clone(),
+                    matrix: obj.matrix.clone()
+                });
+                entry.originalObjects.push(obj);
+            }
+            
+            // Process children recursively
+            if (obj.children && obj.children.length > 0) {
+                obj.children.forEach(child => collectGeometries(child));
+            }
+        }
+        
+        // Collect all geometries
+        collectGeometries(object);
+        
+        // Second pass: create instanced meshes
+        console.log(`Creating instanced meshes for ${geometryMap.size} unique geometries`);
+        
+        geometryMap.forEach((entry, key) => {
+            const instanceCount = entry.instances.length;
+            
+            // Only use instancing for geometries with multiple instances
+            if (instanceCount > 1) {
+                console.log(`Creating instanced mesh for ${key} with ${instanceCount} instances`);
+                
+                // Create material based on type
+                let material;
+                if (entry.isRoad) {
+                    // Road material
                     material = new THREE.MeshStandardMaterial({
                         color: 0x0a0a0a, // Very dark black
                         roughness: 0.9,   // Very rough
                         metalness: 0.1,   // Low metalness
-                        envMapIntensity: 0.2, // Low reflection
+                        envMapIntensity: 0.2 // Low reflection
                     });
-                    
-                    // Make the road receive shadows
-                    obj.receiveShadow = true;
-                    
-                    console.log(`Applied rough black material to road: ${obj.name}`);
                 } else {
-                    // For non-road objects, use the original color scheme
+                    // Regular object material
                     const color = colors[colorIndex % colors.length];
                     colorIndex++;
                     
-                    // Create a new material with the same properties as our cubes
                     material = new THREE.MeshStandardMaterial({
                         color: color,
                         roughness: 0.5,
                         metalness: 0.8
                     });
-                    
-                    console.log(`Applied color ${color.toString(16)} to ${obj.name}`);
                 }
                 
-                // Apply the material to the object
-                obj.material = material;
+                // Create instanced mesh
+                const instancedMesh = new THREE.InstancedMesh(
+                    entry.geometry,
+                    material,
+                    instanceCount
+                );
+                
+                // Set shadow properties
+                instancedMesh.castShadow = !entry.isRoad;
+                instancedMesh.receiveShadow = true;
+                
+                // Set instance matrices
+                const dummy = new THREE.Object3D();
+                for (let i = 0; i < instanceCount; i++) {
+                    const instance = entry.instances[i];
+                    
+                    // Set position, rotation, and scale
+                    dummy.position.copy(instance.position);
+                    dummy.rotation.copy(instance.rotation);
+                    dummy.scale.copy(instance.scale);
+                    dummy.updateMatrix();
+                    
+                    // Set matrix for this instance
+                    instancedMesh.setMatrixAt(i, dummy.matrix);
+                }
+                
+                // Update instance matrices
+                instancedMesh.instanceMatrix.needsUpdate = true;
+                
+                // Add to scene
+                self.scene.add(instancedMesh);
+                self.instancedMeshes.push(instancedMesh);
+                
+                // Hide original objects
+                entry.originalObjects.forEach(obj => {
+                    obj.visible = false;
+                });
+                
+                console.log(`Added instanced mesh with ${instanceCount} instances`);
+            } else {
+                // For single instances, just apply materials to original objects
+                entry.originalObjects.forEach(obj => {
+                    // Determine if this is a road
+                    const isRoad = obj.name && (
+                        obj.name.toLowerCase().includes('road') ||
+                        obj.name.toLowerCase().includes('path') ||
+                        obj.name.toLowerCase().includes('track') ||
+                        obj.name.toLowerCase().includes('street')
+                    );
+                    
+                    // Apply appropriate material
+                    if (isRoad) {
+                        obj.material = new THREE.MeshStandardMaterial({
+                            color: 0x0a0a0a,
+                            roughness: 0.9,
+                            metalness: 0.1,
+                            envMapIntensity: 0.2
+                        });
+                        obj.receiveShadow = true;
+                    } else {
+                        const color = colors[colorIndex % colors.length];
+                        colorIndex++;
+                        
+                        obj.material = new THREE.MeshStandardMaterial({
+                            color: color,
+                            roughness: 0.5,
+                            metalness: 0.8
+                        });
+                    }
+                });
             }
-            
-            // Process children recursively
-            if (obj.children && obj.children.length > 0) {
-                obj.children.forEach(child => applyMaterials(child));
-            }
-        }
+        });
         
-        // Apply materials to all objects
-        applyMaterials(object);
-        
-        // Now add to scene
+        // Add the original object to the scene for non-instanced parts
         self.scene.add(object);
         
         // Force update of all world matrices to ensure correct world positions
