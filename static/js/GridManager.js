@@ -11,7 +11,7 @@ class GridManager {
         this.config = Object.assign({
             // Grid dimensions
             gridSizeX: 100,     // Reduced from 350 for better performance
-            gridSizeZ: 300,     // Reduced from 500 for better performance
+            gridSizeZ: 500,     // Reduced from 500 for better performance
             spacing: 2.0,       // Increased from 1.6 to spread out cubes more
             baseHeight: -18,
             gridX: 0,

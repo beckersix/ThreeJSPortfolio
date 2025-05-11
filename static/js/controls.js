@@ -6,41 +6,65 @@
 // Global reference to controls
 window.portfolioControls = null;
 
+// Flag to prevent multiple initialization attempts
+let controlsInitializing = false;
+
 // Initialize controls when the page is loaded
 document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM loaded, waiting for scene initialization...');
     
-    // Listen for the custom initialization events from SceneController
-    window.addEventListener('sceneInitialized', function(event) {
-        console.log('Received sceneInitialized event, initializing controls...');
+    // Check if scene controller is already available
+    if (window.sceneController && window.sceneController.initialized) {
+        console.log('Scene controller already available, initializing controls immediately');
+        initControlsWithSceneController(window.sceneController);
+        return;
+    }
+    
+    // Listen for the sceneFullyLoaded event (preferred)
+    window.addEventListener('sceneFullyLoaded', function(event) {
+        console.log('Received sceneFullyLoaded event, initializing controls...');
         initControlsWithSceneController(event.detail.sceneController);
     });
     
-    window.addEventListener('sceneFullyLoaded', function(event) {
-        console.log('Received sceneFullyLoaded event, scene is fully loaded with all models');
-        // We could refresh the controls here if needed
-        if (window.portfolioControls) {
-            console.log('Refreshing controls with fully loaded scene');
-            // Update any controls that depend on the fully loaded scene
+    // Listen for the sceneInitialized event (fallback)
+    window.addEventListener('sceneInitialized', function(event) {
+        console.log('Received sceneInitialized event, initializing controls...');
+        // Only initialize if not already initialized by sceneFullyLoaded
+        if (!window.portfolioControls) {
+            initControlsWithSceneController(event.detail.sceneController);
         }
     });
     
-    // Listen for the legacy initialization event
+    // Listen for the legacy initialization event (fallback)
     window.addEventListener('portfolioInitialized', function(event) {
         console.log('Received portfolioInitialized event, initializing controls...');
-        initControlsWithSceneController(event.detail.sceneController);
+        // Only initialize if not already initialized
+        if (!window.portfolioControls) {
+            initControlsWithSceneController(event.detail.sceneController);
+        }
     });
     
     // Also try the regular initialization approach as a fallback
-    initControls();
+    // with a slight delay to give the events a chance to fire first
+    setTimeout(initControls, 1000);
 });
 
 // Function to initialize controls with a provided scene controller
 function initControlsWithSceneController(sceneControllerInstance) {
+    // Check if controls are already initializing or initialized
+    if (controlsInitializing || window.portfolioControls) {
+        console.log('Controls already initializing or initialized, skipping...');
+        return;
+    }
+    
+    // Check if scene controller is valid
     if (!sceneControllerInstance || !sceneControllerInstance.initialized) {
         console.error('Invalid scene controller provided to initControlsWithSceneController');
         return;
     }
+    
+    // Set flag to prevent multiple initializations
+    controlsInitializing = true;
     
     console.log('Initializing controls with provided scene controller...');
     setupControls(sceneControllerInstance);
@@ -73,6 +97,7 @@ function setupControls(sceneControllerInstance) {
     // Check if controls are already initialized
     if (window.portfolioControls) {
         console.log('Controls already initialized, skipping...');
+        controlsInitializing = false; // Reset flag
         return;
     }
     
@@ -147,16 +172,19 @@ function setupControls(sceneControllerInstance) {
     
     initMinimizeButton();
     
-    // Add a global reference for debugging
+    // Create global reference to controls
     window.portfolioControls = {
+        cameraController,
+        gridManager,
         sceneController: sceneControllerInstance,
-        cameraController: cameraController,
-        gridManager: gridManager,
         originalValues: originalValues
     };
     
     console.log('Controls initialized successfully');
     console.log('Access controls via window.portfolioControls for debugging');
+    
+    // Reset the initializing flag
+    controlsInitializing = false;
     
     // Add a test function to directly manipulate camera
     window.testCameraControls = function() {

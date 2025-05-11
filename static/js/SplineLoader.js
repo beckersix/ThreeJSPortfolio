@@ -27,7 +27,36 @@ SplineLoader.prototype.loadOBJModel = function(url, callback) {
     if (!this.objLoader) {
         this.objLoader = new THREE.OBJLoader();
     }
+    
+    // Clear any existing instanced meshes
+    this.instancedMeshes = [];
+    this.effectors = [];
+    
+    console.log('Loading OBJ model from:', url);
+    
     this.objLoader.load(url, function(object) {
+        console.log('OBJ model loaded successfully');
+        
+        // Count all meshes in the OBJ file for debugging
+        let totalMeshCount = 0;
+        let meshNames = [];
+        let meshPositions = [];
+        object.traverse(child => {
+            if (child.type === 'Mesh' && child.geometry) {
+                totalMeshCount++;
+                meshNames.push(child.name);
+                
+                // Get world position for debugging
+                child.updateMatrixWorld(true);
+                const position = new THREE.Vector3();
+                position.setFromMatrixPosition(child.matrixWorld);
+                meshPositions.push(`${child.name}: (${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)})`);
+            }
+        });
+        console.log(`Total meshes in OBJ file: ${totalMeshCount}`);
+        console.log('All mesh names:', meshNames);
+        console.log('All mesh positions:', meshPositions);
+        
         // Define a set of vibrant colors to use for objects
         const colors = [
             0x00ffcc, // Original cube color
@@ -42,181 +71,11 @@ SplineLoader.prototype.loadOBJModel = function(url, callback) {
             0x00ff7f  // Spring green
         ];
         
-        let colorIndex = 0;
-        
-        // Store for instanced meshes
-        self.instancedMeshes = [];
-        
-        // Map to collect similar geometries for instancing
-        const geometryMap = new Map();
-        
-        // First pass: collect all geometries and count instances
-        function collectGeometries(obj) {
-            // Skip the camera path object
-            if (obj.name === 'camera_path') {
-                obj.visible = false;
-                return;
-            }
-            
-            // Check if this is a road object
-            const isRoad = obj.name && (
-                obj.name.toLowerCase().includes('road') ||
-                obj.name.toLowerCase().includes('path') ||
-                obj.name.toLowerCase().includes('track') ||
-                obj.name.toLowerCase().includes('street')
-            );
-            
-            // Only process meshes with geometry
-            if (obj.type === 'Mesh' && obj.geometry) {
-                // Create a key based on geometry properties
-                // This helps identify similar geometries for instancing
-                const vertexCount = obj.geometry.attributes.position.count;
-                const geoKey = `${obj.geometry.type}_${vertexCount}_${isRoad ? 'road' : 'object'}`;
-                
-                // Get or create entry in geometry map
-                if (!geometryMap.has(geoKey)) {
-                    geometryMap.set(geoKey, {
-                        geometry: obj.geometry,
-                        isRoad: isRoad,
-                        instances: [],
-                        originalObjects: []
-                    });
-                }
-                
-                // Store instance data
-                const entry = geometryMap.get(geoKey);
-                entry.instances.push({
-                    position: obj.position.clone(),
-                    rotation: obj.rotation.clone(),
-                    scale: obj.scale.clone(),
-                    matrix: obj.matrix.clone()
-                });
-                entry.originalObjects.push(obj);
-            }
-            
-            // Process children recursively
-            if (obj.children && obj.children.length > 0) {
-                obj.children.forEach(child => collectGeometries(child));
-            }
-        }
-        
-        // Collect all geometries
-        collectGeometries(object);
-        
-        // Second pass: create instanced meshes
-        console.log(`Creating instanced meshes for ${geometryMap.size} unique geometries`);
-        
-        geometryMap.forEach((entry, key) => {
-            const instanceCount = entry.instances.length;
-            
-            // Only use instancing for geometries with multiple instances
-            if (instanceCount > 1) {
-                console.log(`Creating instanced mesh for ${key} with ${instanceCount} instances`);
-                
-                // Create material based on type
-                let material;
-                if (entry.isRoad) {
-                    // Road material
-                    material = new THREE.MeshStandardMaterial({
-                        color: 0x0a0a0a, // Very dark black
-                        roughness: 0.9,   // Very rough
-                        metalness: 0.1,   // Low metalness
-                        envMapIntensity: 0.2 // Low reflection
-                    });
-                } else {
-                    // Regular object material
-                    const color = colors[colorIndex % colors.length];
-                    colorIndex++;
-                    
-                    material = new THREE.MeshStandardMaterial({
-                        color: color,
-                        roughness: 0.5,
-                        metalness: 0.8
-                    });
-                }
-                
-                // Create instanced mesh
-                const instancedMesh = new THREE.InstancedMesh(
-                    entry.geometry,
-                    material,
-                    instanceCount
-                );
-                
-                // Set shadow properties
-                instancedMesh.castShadow = !entry.isRoad;
-                instancedMesh.receiveShadow = true;
-                
-                // Set instance matrices
-                const dummy = new THREE.Object3D();
-                for (let i = 0; i < instanceCount; i++) {
-                    const instance = entry.instances[i];
-                    
-                    // Set position, rotation, and scale
-                    dummy.position.copy(instance.position);
-                    dummy.rotation.copy(instance.rotation);
-                    dummy.scale.copy(instance.scale);
-                    dummy.updateMatrix();
-                    
-                    // Set matrix for this instance
-                    instancedMesh.setMatrixAt(i, dummy.matrix);
-                }
-                
-                // Update instance matrices
-                instancedMesh.instanceMatrix.needsUpdate = true;
-                
-                // Add to scene
-                self.scene.add(instancedMesh);
-                self.instancedMeshes.push(instancedMesh);
-                
-                // Hide original objects
-                entry.originalObjects.forEach(obj => {
-                    obj.visible = false;
-                });
-                
-                console.log(`Added instanced mesh with ${instanceCount} instances`);
-            } else {
-                // For single instances, just apply materials to original objects
-                entry.originalObjects.forEach(obj => {
-                    // Determine if this is a road
-                    const isRoad = obj.name && (
-                        obj.name.toLowerCase().includes('road') ||
-                        obj.name.toLowerCase().includes('path') ||
-                        obj.name.toLowerCase().includes('track') ||
-                        obj.name.toLowerCase().includes('street')
-                    );
-                    
-                    // Apply appropriate material
-                    if (isRoad) {
-                        obj.material = new THREE.MeshStandardMaterial({
-                            color: 0x0a0a0a,
-                            roughness: 0.9,
-                            metalness: 0.1,
-                            envMapIntensity: 0.2
-                        });
-                        obj.receiveShadow = true;
-                    } else {
-                        const color = colors[colorIndex % colors.length];
-                        colorIndex++;
-                        
-                        obj.material = new THREE.MeshStandardMaterial({
-                            color: color,
-                            roughness: 0.5,
-                            metalness: 0.8
-                        });
-                    }
-                });
-            }
-        });
-        
-        // Add the original object to the scene for non-instanced parts
-        self.scene.add(object);
-        
         // Force update of all world matrices to ensure correct world positions
         object.updateMatrixWorld(true);
         
-        console.log('=== UPDATING WORLD MATRICES FOR ALL OBJECTS ===');
-        
         // Log all object names and types in the OBJ hierarchy
+        console.log('=== UPDATING WORLD MATRICES FOR ALL OBJECTS ===');
         function logNames(obj, depth = 0) {
             console.log(' '.repeat(depth * 2) + obj.name + ' (' + obj.type + ')');
             
@@ -225,7 +84,7 @@ SplineLoader.prototype.loadOBJModel = function(url, callback) {
                 const worldPos = new THREE.Vector3();
                 worldPos.setFromMatrixPosition(obj.matrixWorld);
                 console.log(' '.repeat(depth * 2) + '  World Position:', 
-                           worldPos.x.toFixed(2), worldPos.y.toFixed(2), worldPos.z.toFixed(2));
+                          worldPos.x.toFixed(2), worldPos.y.toFixed(2), worldPos.z.toFixed(2));
             }
             
             if (obj.children) obj.children.forEach(child => logNames(child, depth + 1));
@@ -233,40 +92,140 @@ SplineLoader.prototype.loadOBJModel = function(url, callback) {
         SplineLoader.prototype.logNames = logNames;
         logNames(object);
         
-        // Find all effectors in the scene and store them
-        if (!self.effectors) {
-            self.effectors = [];
-        }
-        self.findEffectors(object);
+        // Collect meshes by type for instancing
+        const meshEntries = [];
         
-        // Find the road object for collision detection
-        self.findRoadObject(object);
+        // Traverse the object to collect all meshes
+        object.traverse(function(child) {
+            // Skip the camera path object
+            if (child.name === 'camera_path') {
+                child.visible = false;
+                return;
+            }
             
-        // Find 'camera_path' and extract points
-        const cameraPathObj = self._findObjectByName(object, 'camera_path');
-        if (cameraPathObj && cameraPathObj.geometry) {
-            self.pathPoints = self._extractPoints(cameraPathObj);
-            if (self.pathPoints.length > 1) {
-                // Resample the curve for smoothness
-                const tempCurve = new THREE.CatmullRomCurve3(self.pathPoints);
-                self.pathPoints = tempCurve.getSpacedPoints(200);
-                self.cameraPath = new THREE.CatmullRomCurve3(self.pathPoints);
-            }
-        }
-        
-        if (cameraPathObj) {
-            console.log('camera_path object:', cameraPathObj);
-            if (cameraPathObj.geometry) {
-                console.log('camera_path geometry:', cameraPathObj.geometry);
-                if (cameraPathObj.geometry.attributes && cameraPathObj.geometry.attributes.position) {
-                    console.log('position attribute:', cameraPathObj.geometry.attributes.position);
-                    console.log('position count:', cameraPathObj.geometry.attributes.position.count);
-                } else {
-                    console.log('No position attribute found on camera_path geometry');
+            // Only process meshes with geometry
+            if (child.type === 'Mesh' && child.geometry) {
+                // Skip camera path objects
+                if (child.name === 'camera_path') {
+                    child.visible = false;
+                    return;
                 }
-            } else {
-                console.log('camera_path has no geometry');
+                
+                // Check if this is an effector
+                const isEffector = child.name.toLowerCase().includes('effector') || 
+                                  child.name.toLowerCase().includes('effect') || 
+                                  child.name.toLowerCase().includes('emitter');
+                
+                if (isEffector) {
+                    // Make the original object invisible
+                    child.visible = false;
+                    
+                    // Get a random vertex from the geometry as the effector point
+                    let position;
+                    
+                    if (child.geometry && child.geometry.isBufferGeometry) {
+                        // Get the position attribute from the buffer geometry
+                        const positionAttr = child.geometry.getAttribute('position');
+                        
+                        if (positionAttr && positionAttr.count > 0) {
+                            // Select a random vertex
+                            const randomVertexIndex = Math.floor(Math.random() * positionAttr.count);
+                            position = new THREE.Vector3();
+                            position.fromBufferAttribute(positionAttr, randomVertexIndex);
+                            
+                            // Apply the object's world matrix to get the world position
+                            child.updateMatrixWorld(true);
+                            position.applyMatrix4(child.matrixWorld);
+                            
+                            console.log(`Selected random vertex ${randomVertexIndex} from ${positionAttr.count} vertices for effector ${child.name}`);
+                        } else {
+                            // Fallback to object position if no vertices
+                            position = new THREE.Vector3();
+                            child.updateMatrixWorld(true);
+                            position.setFromMatrixPosition(child.matrixWorld);
+                            console.log(`No vertices found in geometry for ${child.name}, using center position`);
+                        }
+                    } else {
+                        // Fallback to object position if no geometry
+                        position = new THREE.Vector3();
+                        child.updateMatrixWorld(true);
+                        position.setFromMatrixPosition(child.matrixWorld);
+                        console.log(`No geometry found for ${child.name}, using center position`);
+                    }
+                    
+                    // Add to effectors list with position only
+                    self.effectors.push({
+                        name: child.name,
+                        position: position
+                    });
+                    
+                    console.log(`Added effector position: ${child.name} at random vertex (${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)})`);
+                } else {
+                    // For non-effectors, make sure they're visible and apply a colorful material
+                    child.visible = true;
+                    
+                    // Check if this is a road
+                    const isRoad = child.name.toLowerCase().includes('road') || 
+                                  child.name.toLowerCase().includes('path') || 
+                                  child.name.toLowerCase().includes('track') || 
+                                  child.name.toLowerCase().includes('street');
+                    
+                    if (isRoad) {
+                        child.material = new THREE.MeshStandardMaterial({
+                            color: 0x0a0a0a, // Very dark black
+                            roughness: 0.9,   // Very rough
+                            metalness: 0.1,   // Low metalness
+                            envMapIntensity: 0.2 // Low reflection
+                        });
+                    } else {
+                        // Regular object with random color
+                        const colorIndex = Math.floor(Math.random() * colors.length);
+                        child.material = new THREE.MeshStandardMaterial({
+                            color: colors[colorIndex],
+                            roughness: 0.5,
+                            metalness: 0.8
+                        });
+                    }
+                    
+                    // Disable frustum culling to ensure all objects are rendered
+                    child.frustumCulled = false;
+                    
+                    // Push to meshes array
+                    self.instancedMeshes.push(child);
+                }
+                
+                // Log the object for debugging
+                child.updateMatrixWorld(true);
             }
+        });
+        
+        // Skip mesh collection, just add the objects directly
+        console.log('Adding the scene to the main scene...');
+        self.scene.add(object);
+        
+        // Count meshes in the scene
+        console.log(`Added ${self.instancedMeshes.length} visible meshes to the scene`);
+        
+        // Look for camera path
+        const cameraPathObj = self._findObjectByName(object, 'camera_path');
+        if (cameraPathObj) {
+            console.log('Found camera path object:', cameraPathObj);
+            const points = self._extractPoints(cameraPathObj);
+            if (points.length > 0) {
+                self.cameraPath = new THREE.CatmullRomCurve3(points);
+                console.log('Created camera path with', points.length, 'points');
+                
+                // Create a visual representation of the path (for debugging)
+                const geometry = new THREE.BufferGeometry().setFromPoints(
+                    self.cameraPath.getPoints(100)
+                );
+                const material = new THREE.LineBasicMaterial({ color: 0xff0000 });
+                const curve = new THREE.Line(geometry, material);
+                self.scene.add(curve);
+            }
+        } else {
+            console.log('No camera path found, creating default path');
+            self.createSineWaveSpline();
         }
         
         if (callback) callback(self);
@@ -374,6 +333,25 @@ SplineLoader.prototype.findEffectors = function(object) {
                 y: parseFloat(e.position.y.toFixed(2)),
                 z: parseFloat(e.position.z.toFixed(2))
             })));
+            
+            this.effectors.forEach(e => {
+                // Make sure the effector object is visible
+                if (e.object) {
+                    e.object.visible = true;
+                    console.log(`  - Made ${e.name} visible`);
+                    
+                    // Apply a special material to make it stand out
+                    if (e.object.material) {
+                        e.object.material = new THREE.MeshStandardMaterial({
+                            color: 0xff00ff, // Bright pink
+                            emissive: 0xff00ff,
+                            emissiveIntensity: 0.5,
+                            metalness: 1.0,
+                            roughness: 0.2
+                        });
+                    }
+                }
+            });
         }, 1000);
     }
     
@@ -386,6 +364,9 @@ SplineLoader.prototype.findEffectors = function(object) {
         object.name.toLowerCase().includes('effect') ||
         object.name.toLowerCase().includes('emitter')
     )) {
+        // Make sure the effector is visible
+        object.visible = true;
+        
         // Calculate the center position of the geometry (average of all vertices)
         let position;
         
@@ -427,12 +408,25 @@ SplineLoader.prototype.findEffectors = function(object) {
             console.log(`No geometry found for ${object.name}, using world position (${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)})`);
         }
         
+        // Apply a special material to make it stand out
+        if (object.material) {
+            object.material = new THREE.MeshStandardMaterial({
+                color: 0xff00ff, // Bright pink
+                emissive: 0xff00ff,
+                emissiveIntensity: 0.5,
+                metalness: 1.0,
+                roughness: 0.2
+            });
+        }
+        
         // Store the effector with its position
         this.effectors.push({
             name: object.name,
             position: position,
             object: object
         });
+        
+        console.log(`Added effector: ${object.name} and made it visible`);
     }
     
     // Recursively check all children
@@ -452,6 +446,17 @@ SplineLoader.prototype.getEffectors = function() {
     
     console.log(`Returning ${this.effectors.length} effectors from SplineLoader`);
     return this.effectors;
+};
+
+// Get all instanced meshes
+SplineLoader.prototype.getInstancedMeshes = function() {
+    if (!this.instancedMeshes) {
+        console.warn('InstancedMeshes array is undefined, initializing empty array');
+        this.instancedMeshes = [];
+    }
+    
+    console.log(`Returning ${this.instancedMeshes.length} instanced meshes from SplineLoader`);
+    return this.instancedMeshes;
 };
 
 // Creates a simple sine wave spline for testing

@@ -58,14 +58,6 @@ SceneController.prototype.init = function() {
     const fogColor = new THREE.Color(0x89a7c2);  // Soft blue-gray color
     this.scene.fog = new THREE.FogExp2(fogColor, 0.002);  // Reduced density for HDRI compatibility
     
-    // Note: We're not setting the background here anymore
-    // as it will be set by the HDRI environment map
-    
-    // Add debug floor grid (commented out for production)
-    //const gridHelper = new THREE.GridHelper(10000, 10000);
-    //gridHelper.position.y = 0;
-    //this.scene.add(gridHelper);
-    
     // Create camera with extended far plane to see distant objects
     this.camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 10000);
     this.camera.position.set(0, 50, 2080); // Higher and further back
@@ -96,88 +88,121 @@ SceneController.prototype.init = function() {
     // Initialize SplineLoader for loading OBJ models with camera paths
     this.splineLoader = new SplineLoader(this.scene);
     
-    // Initialize GridManager first (don't wait for OBJ model)
-    this.updatePreloader(25, 'Creating cube grid...');
-    this.initializeGridManager();
-    
-    // Load the OBJ model with camera path
-    this.updatePreloader(22, 'Loading 3D models...');
-    
-    // Path to your OBJ file - using the existing Scene.obj file
-    const objPath = './static/models/Scene.obj';
-    
-    const self = this; // Store reference to this for use in callbacks
-    
-    // Create camera controller early so controls can access it
-    this.updatePreloader(50, 'Setting up camera...');
+    // Create camera controller
     this.cameraController = new CameraController(this.camera, this.player);
     this.cameraController.init();
     
     // Set up event listeners
-    this.updatePreloader(60, 'Setting up event handlers...');
     this.setupEventListeners();
     
     // Load environment map
     this.updatePreloader(30, 'Loading environment...');
     this.loadHDRIEnvironment();
     
-    // Create test effectors
-    this.updatePreloader(40, 'Creating test effectors...');
-    this.createTestEffectors();
+    // Path to your OBJ file
+    const objPath = './static/models/Scene.obj';
     
-    // Start animation loop
-    this.updatePreloader(70, 'Starting animation loop...');
-    this.animate();
+    // Load the OBJ model with camera path
+    this.updatePreloader(40, 'Loading 3D models...');
     
-    // Mark as initialized early to allow controls to connect
-    // We'll still load the OBJ model in the background
-    this.initialized = true;
-    console.log('Scene controller core components initialized');
+    const self = this; // Store reference to this for callbacks
     
-    // Dispatch an event to notify that the core components are initialized
-    const initEvent = new CustomEvent('sceneInitialized', {
-        detail: { sceneController: this }
-    });
-    window.dispatchEvent(initEvent);
-    
-    // Load the OBJ model asynchronously
+    // Load the OBJ model
     this.splineLoader.loadOBJModel(objPath, (loader, error) => {
         if (error) {
             console.error('Failed to load OBJ model:', error);
         } else {
             console.log('OBJ model loaded successfully');
+            
+            // Verify instanced meshes are loaded
+            const instancedMeshes = this.splineLoader.getInstancedMeshes();
+            console.log(`SceneController: Loaded ${instancedMeshes.length} instanced mesh groups`);
+            
+            // Calculate scene bounds for proper camera positioning
+            const sceneBounds = new THREE.Box3();
+            
+            instancedMeshes.forEach((mesh, index) => {
+                console.log(`SceneController: Instanced mesh #${index} '${mesh.name}', instances: ${mesh.count}`);
+                
+                // Ensure frustum culling is disabled for all instanced meshes
+                mesh.frustumCulled = false;
+                
+                // Expand scene bounds to include this mesh
+                const meshBounds = new THREE.Box3().setFromObject(mesh);
+                sceneBounds.union(meshBounds);
+                
+                console.log(`Mesh '${mesh.name}' bounds:`, 
+                    `Min (${meshBounds.min.x.toFixed(2)}, ${meshBounds.min.y.toFixed(2)}, ${meshBounds.min.z.toFixed(2)})`, 
+                    `Max (${meshBounds.max.x.toFixed(2)}, ${meshBounds.max.y.toFixed(2)}, ${meshBounds.max.z.toFixed(2)})`);
+            });
+            
+            // Add a debug helper to visualize the scene boundaries
+            const sceneBoundsHelper = new THREE.Box3Helper(sceneBounds, 0xff0000);
+            this.scene.add(sceneBoundsHelper);
+            
+            // Log the overall scene bounds
+            console.log('Overall scene bounds:', 
+                `Min (${sceneBounds.min.x.toFixed(2)}, ${sceneBounds.min.y.toFixed(2)}, ${sceneBounds.min.z.toFixed(2)})`, 
+                `Max (${sceneBounds.max.x.toFixed(2)}, ${sceneBounds.max.y.toFixed(2)}, ${sceneBounds.max.z.toFixed(2)})`);
+            
+            // No debug panel or controls as they exist in the other UI
+            
+            // Store the scene bounds for later use
+            this.sceneBounds = sceneBounds;
+            
             // If the model has a camera path, use it
             if (loader && loader.cameraPath) {
                 self.objCameraPath = loader.cameraPath;
                 console.log('Camera path loaded from OBJ model');
             }
             
+            // Initialize GridManager after OBJ model loads
+            self.updatePreloader(60, 'Creating cube grid...');
+            self.initializeGridManager();
+            
+            // Create test effectors
+            self.updatePreloader(80, 'Creating test effectors...');
+            self.createTestEffectors();
+            
+            // Initialize UI Controller if it doesn't already exist
+            self.updatePreloader(95, 'Setting up UI controls...');
+            if (!self.uiController) {
+                console.log('Creating UI Controller');
+                self.uiController = new UIController(self, self.cameraController, self.gridManager);
+            } else {
+                console.log('UI Controller already exists, skipping creation');
+            }
+            
             // Hide preloader when everything is ready
             self.updatePreloader(100, 'Ready!');
             setTimeout(() => self.hidePreloader(), 500);
             
-            console.log('Scene controller fully loaded with OBJ model');
+            // Mark as initialized
+            self.initialized = true;
+            console.log('Scene controller initialized successfully');
             
             // Dispatch an event to notify that everything is fully loaded
             const loadedEvent = new CustomEvent('sceneFullyLoaded', {
                 detail: { sceneController: self }
             });
             window.dispatchEvent(loadedEvent);
+            
+            // Also dispatch the sceneInitialized event for backward compatibility
+            const initEvent = new CustomEvent('sceneInitialized', {
+                detail: { sceneController: self }
+            });
+            window.dispatchEvent(initEvent);
         }
     });
+    
+    // Start animation loop
+    this.animate();
     
     // Add window resize handler
     window.addEventListener('resize', this.onWindowResize.bind(this));
     
-    // Set up event listeners
-    this.setupEventListeners();
-    
-    // Initialize UI Controller
-    this.updatePreloader(95, 'Setting up UI controls...');
-    this.uiController = new UIController(this, this.cameraController, this.gridManager);
-    
-    // Mark as initialized
-    this.initialized = true;
+    // Set up global reference for debugging
+    window.sceneController = this;
 };
 
 // Initialize GridManager
@@ -234,23 +259,9 @@ SceneController.prototype.initializeGridManager = function() {
         });
     }
     
-    // Add any other loaded effectors from SplineLoader
-    if (this.splineLoader && this.splineLoader.effectors) {
-        this.splineLoader.effectors.forEach(effector => {
-            this.gridManager.addEffector({
-                id: effector.name,
-                name: effector.name,
-                object: effector.object,
-                position: effector.position,
-                radius: 100,
-                maxRaise: 25,
-                maxScale: 2.0,
-                active: true,
-                color: 0x00ffff,
-                visualize: true
-            });
-        });
-    }
+    // Note: We don't add effectors from SplineLoader here anymore
+    // They will be added after the OBJ model is fully loaded
+    // in the createTestEffectors method
 };
 
 // Set up scene lighting
@@ -438,89 +449,73 @@ SceneController.prototype.createTestEffectors = function() {
     console.log('=== ADDING EFFECTORS TO GRID ===');
     
     // Clear any existing test effectors
+    if (this.testEffectors && this.testEffectors.length > 0) {
+        console.log(`Clearing ${this.testEffectors.length} existing test effectors`);
+        this.testEffectors.forEach(effector => {
+            if (effector && this.scene) {
+                this.scene.remove(effector);
+            }
+        });
+    }
+    
     this.testEffectors = [];
     
+    // Make sure the SplineLoader has been initialized and has found effectors
+    if (!this.splineLoader) {
+        console.error('SplineLoader not initialized');
+        return;
+    }
+    
+    // Force the SplineLoader to update its effectors list
+    if (this.splineLoader.findEffectors && this.splineLoader.originalObject) {
+        console.log('Refreshing effectors from original object');
+        this.splineLoader.effectors = []; // Clear existing effectors
+        this.splineLoader.findEffectors(this.splineLoader.originalObject);
+    }
+    
     // Check if we have effectors from the OBJ model via SplineLoader
-    if (this.splineLoader && this.splineLoader.effectors && this.splineLoader.effectors.length > 0) {
+    if (this.splineLoader.effectors && this.splineLoader.effectors.length > 0) {
         const effectorCount = this.splineLoader.effectors.length;
         
         // Create a collection of effector positions for console output
-        const effectorPositions = this.splineLoader.effectors.map(e => ({
-            name: e.name,
-            x: parseFloat(e.position.x.toFixed(2)),
-            y: parseFloat(e.position.y.toFixed(2)),
-            z: parseFloat(e.position.z.toFixed(2))
-        }));
+        const effectorPositions = this.splineLoader.effectors.map(e => {
+            // Get position directly from the object's matrix
+            if (e.object) {
+                e.object.updateMatrixWorld(true);
+                const position = new THREE.Vector3();
+                position.setFromMatrixPosition(e.object.matrixWorld);
+                return {
+                    name: e.name,
+                    x: parseFloat(position.x.toFixed(2)),
+                    y: parseFloat(position.y.toFixed(2)),
+                    z: parseFloat(position.z.toFixed(2))
+                };
+            } else {
+                return { name: e.name, x: 0, y: 0, z: 0 };
+            }
+        });
         
         // Output effector positions as a table
-        console.log(`Adding ${effectorCount} effectors to grid:`);
+        console.log(`Adding ${effectorCount} effectors to grid with ORIGINAL positions:`);
         console.table(effectorPositions);
         
         // Process each effector from the OBJ model
         this.splineLoader.effectors.forEach(effector => {
             // Skip if position is invalid
             if (!effector.position) {
-                console.error(`Effector ${effector.name} has no position`);
+                console.error(`Effector ${effector.name} has no position data`);
                 return;
             }
             
-            // Create a visual representation for the effector
-            const geometry = new THREE.SphereGeometry(5, 16, 16);
-            const material = new THREE.MeshStandardMaterial({
-                color: 0x00ffff,
-                emissive: 0x003333,
-                wireframe: true,
-                transparent: true,
-                opacity: 0.7
-            });
-            
-            // Create the effector mesh at the EXACT position from the OBJ
-            const effectorMesh = new THREE.Mesh(geometry, material);
-            
-            // Ensure the position is valid
-            if (!effector.position || isNaN(effector.position.x) || isNaN(effector.position.y) || isNaN(effector.position.z)) {
-                console.error(`Invalid position for effector ${effector.name}:`, effector.position);
-                // Create a fallback position
-                effector.position = new THREE.Vector3(
-                    Math.random() * 200 - 100,  // Random X between -100 and 100
-                    10,                         // Fixed Y at 10
-                    Math.random() * -500        // Random Z between 0 and -500
-                );
-                console.log(`Created fallback position: (${effector.position.x.toFixed(2)}, ${effector.position.y.toFixed(2)}, ${effector.position.z.toFixed(2)})`);
-            }
-            
-            // Log the position before setting it
-            console.log(`USING EFFECTOR POSITION: ${effector.name} at (${effector.position.x.toFixed(2)}, ${effector.position.y.toFixed(2)}, ${effector.position.z.toFixed(2)})`);
-            
-            // Set the position
-            effectorMesh.position.copy(effector.position);
-            effectorMesh.name = effector.name;
-            
-            // Log the position after setting it
-            console.log(`MESH POSITION SET: ${effectorMesh.name} at (${effectorMesh.position.x.toFixed(2)}, ${effectorMesh.position.y.toFixed(2)}, ${effectorMesh.position.z.toFixed(2)})`);
-            
-            // Add a point light
-            const light = new THREE.PointLight(0x00ffff, 1, 50);
-            light.position.set(0, 0, 0);
-            effectorMesh.add(light);
-            
-            // Add to scene
-            this.scene.add(effectorMesh);
-            
-            // Store reference
-            this.testEffectors.push(effectorMesh);
-            
-            // Add to GridManager
+            // No mesh creation - just add effector point to grid manager
             if (this.gridManager) {
-                // Log the position being sent to GridManager
-                const clonedPosition = effector.position.clone();
-                console.log(`ADDING TO GRID: ${effector.name} at (${clonedPosition.x.toFixed(2)}, ${clonedPosition.y.toFixed(2)}, ${clonedPosition.z.toFixed(2)})`);
+                console.log(`ADDING EFFECTOR TO GRID: ${effector.name} at (${effector.position.x.toFixed(2)}, ${effector.position.y.toFixed(2)}, ${effector.position.z.toFixed(2)})`);
                 
                 // Add the effector to GridManager with its position
                 this.gridManager.addEffector({
                     id: effector.name,
                     name: effector.name,
-                    position: clonedPosition, // Clone to avoid reference issues
+                    position: effector.position.clone(), // Clone to avoid reference issues
                     radius: 50,              // REDUCED from 100 to 50
                     maxRaise: 15,            // REDUCED from 25 to 15
                     maxScale: 1.5,           // REDUCED from 2.0 to 1.5
@@ -528,8 +523,6 @@ SceneController.prototype.createTestEffectors = function() {
                     color: 0x00ffff,
                     visualize: true
                 });
-                
-                console.log(`EFFECTOR ADDED TO GRID: ${effector.name}`);
             }
         });
         
