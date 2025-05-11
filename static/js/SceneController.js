@@ -49,23 +49,12 @@ SceneController.prototype.init = function() {
     this.scene = new THREE.Scene();
     
     // Add atmospheric fog for depth and mood
+    // Using a lighter fog that works well with HDRI
     const fogColor = new THREE.Color(0x89a7c2);  // Soft blue-gray color
-    this.scene.fog = new THREE.FogExp2(fogColor, 0.0085);  // Exponential fog with moderate density
+    this.scene.fog = new THREE.FogExp2(fogColor, 0.002);  // Reduced density for HDRI compatibility
     
-    // Create a gradient background
-    const topColor = new THREE.Color(0x1c3a5e);  // Deep blue
-    const bottomColor = new THREE.Color(0xc5d5e5);  // Light blue-gray
-    const canvas = document.createElement('canvas');
-    canvas.width = 2;
-    canvas.height = 512;
-    const context = canvas.getContext('2d');
-    const gradient = context.createLinearGradient(0, 0, 0, 512);
-    gradient.addColorStop(0, topColor.getStyle());
-    gradient.addColorStop(1, bottomColor.getStyle());
-    context.fillStyle = gradient;
-    context.fillRect(0, 0, 2, 512);
-    const texture = new THREE.CanvasTexture(canvas);
-    this.scene.background = texture;
+    // Note: We're not setting the background here anymore
+    // as it will be set by the HDRI environment map
     
     // Add debug floor grid (commented out for production)
     //const gridHelper = new THREE.GridHelper(10000, 10000);
@@ -232,19 +221,210 @@ SceneController.prototype.initializeGridManager = function() {
 
 // Set up scene lighting
 SceneController.prototype.setupLighting = function() {
-    // Soft ambient fill
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    // Load HDRI environment map for lighting and reflections
+    this.loadHDRIEnvironment();
+    
+    // Add a subtle ambient light as fill
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
     this.scene.add(ambientLight);
     
-    // Visually effective directional light
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.1);
+    // Add directional light for shadows
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
     directionalLight.position.set(5, 10, 7);
     directionalLight.castShadow = true;
-    directionalLight.shadow.mapSize.width = 1024;
-    directionalLight.shadow.mapSize.height = 1024;
+    directionalLight.shadow.mapSize.width = 2048;
+    directionalLight.shadow.mapSize.height = 2048;
     directionalLight.shadow.camera.near = 1;
-    directionalLight.shadow.camera.far = 100;
+    directionalLight.shadow.camera.far = 50;
     this.scene.add(directionalLight);
+};
+
+// Load and setup environment map using standard TextureLoader
+SceneController.prototype.loadHDRIEnvironment = function() {
+    const self = this;
+    
+    // Update preloader
+    this.updatePreloader(18, 'Loading environment map...');
+    
+    // Material parameters for reflective surfaces
+    const params = {
+        metalness: 1.0,
+        roughness: 0.0,
+        exposure: 1.5
+    };
+    
+    // Configure renderer for physically correct lighting
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = params.exposure;
+    this.renderer.outputEncoding = THREE.sRGBEncoding;
+    
+    // Create a standard TextureLoader
+    const textureLoader = new THREE.TextureLoader();
+    
+    // Path to your converted HDR file (jpg format)
+    const hdrPath = './static/HDRI.hdr.jpg';
+    
+    // Load the environment map
+    textureLoader.load(hdrPath, function(texture) {
+        // Set mapping to equirectangular reflection mapping
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+        texture.needsUpdate = true;
+        
+        // Set scene background and environment
+        self.scene.background = texture;
+        self.scene.environment = texture; // This enables reflections on materials
+        
+        // Store the environment map for later access
+        self.environmentMap = texture;
+        
+        // Update material settings for all objects in the scene
+        self.updateSceneMaterials(params);
+        
+        // Update preloader
+        self.updatePreloader(20, 'Environment map loaded!');
+        console.log('Environment map loaded successfully');
+    }, 
+    // Progress callback
+    function(xhr) {
+        if (xhr.total) {
+            const progress = 15 + (xhr.loaded / xhr.total) * 3;
+            self.updatePreloader(progress, 'Loading environment map...');
+        }
+    },
+    // Error callback 
+    function(error) {
+        console.error('Error loading environment map:', error);
+        // Fall back to procedural environment
+        self.createProceduralEnvironment();
+    });
+    
+    // Also try to create a cube map for better reflections
+    this.createCubeMapEnvironment(params);
+};
+
+// Create a cube map environment for better reflections
+SceneController.prototype.createCubeMapEnvironment = function(params) {
+    const self = this;
+    
+    // Create a cube texture loader
+    const cubeTextureLoader = new THREE.CubeTextureLoader();
+    
+    // Path to cube map images (if available)
+    const path = './static/cubemap/';
+    const format = '.jpg';
+    const urls = [
+        path + 'px' + format, path + 'nx' + format,
+        path + 'py' + format, path + 'ny' + format,
+        path + 'pz' + format, path + 'nz' + format
+    ];
+    
+    // Try to load the cube map
+    cubeTextureLoader.load(urls, function(cubeTexture) {
+        // Set as environment map for reflections
+        self.scene.environment = cubeTexture;
+        console.log('Cube map environment loaded successfully');
+    }, undefined, function(error) {
+        console.log('Cube map not available, using equirectangular map instead');
+    });
+};
+
+// Update all materials in the scene to match UltraHDR example settings
+SceneController.prototype.updateSceneMaterials = function(params) {
+    // Update the grid manager materials if available
+    if (this.gridManager && this.gridManager.instancedMesh) {
+        const material = this.gridManager.instancedMesh.material;
+        
+        // Apply UltraHDR example-like settings
+        if (material.isMeshStandardMaterial || material.isMeshPhysicalMaterial) {
+            material.roughness = params.roughness;
+            material.metalness = params.metalness;
+            material.needsUpdate = true;
+        }
+    }
+    
+    // Update any other objects in the scene
+    this.scene.traverse((object) => {
+        if (object.isMesh && object.material) {
+            const material = object.material;
+            
+            // Apply UltraHDR example-like settings
+            if (material.isMeshStandardMaterial || material.isMeshPhysicalMaterial) {
+                material.roughness = params.roughness;
+                material.metalness = params.metalness;
+                material.needsUpdate = true;
+            }
+        }
+    });
+};
+
+// Create a procedural environment if HDR loading fails
+SceneController.prototype.createProceduralEnvironment = function() {
+    console.log('Creating procedural environment map');
+    
+    // Create a simple procedural environment for reflections
+    const colors = [0x0000ff, 0x00ffff, 0xffff00, 0xff0000, 0x00ff00, 0xff00ff];
+    const envMap = this.createProceduralCubeMap(colors);
+    
+    // Set scene environment for reflections
+    this.scene.environment = envMap;
+    
+    // Create a nice gradient background
+    this.createGradientBackground();
+    
+    // Update preloader
+    this.updatePreloader(20, 'Procedural environment loaded!');
+}
+
+// Create a procedural cube map for reflections
+SceneController.prototype.createProceduralCubeMap = function(colors) {
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext('2d');
+    
+    // Create a cube texture with solid colors
+    const textures = [];
+    
+    for (let i = 0; i < 6; i++) {
+        // Clone the canvas for each face
+        const faceCanvas = canvas.cloneNode();
+        const faceContext = faceCanvas.getContext('2d');
+        
+        // Fill with a solid color
+        faceContext.fillStyle = '#' + colors[i].toString(16).padStart(6, '0');
+        faceContext.fillRect(0, 0, size, size);
+        
+        // Create texture from canvas
+        const texture = new THREE.CanvasTexture(faceCanvas);
+        texture.needsUpdate = true;
+        textures.push(texture);
+    }
+    
+    // Create cube texture
+    const cubeTexture = new THREE.CubeTexture(textures);
+    cubeTexture.needsUpdate = true;
+    
+    return cubeTexture;
+};
+
+// Create a gradient background as fallback
+SceneController.prototype.createGradientBackground = function() {
+    // Create a gradient background
+    const topColor = new THREE.Color(0x1c3a5e);  // Deep blue
+    const bottomColor = new THREE.Color(0xc5d5e5);  // Light blue-gray
+    const canvas = document.createElement('canvas');
+    canvas.width = 2;
+    canvas.height = 512;
+    const context = canvas.getContext('2d');
+    const gradient = context.createLinearGradient(0, 0, 0, 512);
+    gradient.addColorStop(0, topColor.getStyle());
+    gradient.addColorStop(1, bottomColor.getStyle());
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 2, 512);
+    const texture = new THREE.CanvasTexture(canvas);
+    this.scene.background = texture;
+    console.log('Created fallback gradient background');
 };
 
 // Use ONLY the effectors from the OBJ model with their actual positions

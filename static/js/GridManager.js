@@ -13,7 +13,7 @@ class GridManager {
             gridSizeX: 550,
             gridSizeZ: 550,
             spacing: 1.6,
-            baseHeight: -15,
+            baseHeight: -18,
             gridX: 0,
             gridZ: -50,
             
@@ -81,11 +81,17 @@ class GridManager {
                 this.config.cubeSize
             );
             
+            // Create material matching the UltraHDR example
+            // Using MeshStandardMaterial like in the example
             const cubeMat = new THREE.MeshStandardMaterial({ 
                 color: this.config.cubeColor,
-                roughness: 0.5,
-                metalness: 0.8
+                roughness: 0.0,         // No roughness for perfect reflections
+                metalness: 1.0,         // Full metalness for maximum reflections
+                envMapIntensity: 1.0    // Default environment map intensity
             });
+            
+            // The UltraHDR example uses a simple MeshStandardMaterial with
+            // roughness and metalness parameters that are updated dynamically
             
             // Calculate total cubes
             const totalCubes = this.config.gridSizeX * this.config.gridSizeZ;
@@ -597,10 +603,19 @@ class GridManager {
                 
                 // Calculate scale effect (closer = larger)
                 let scaleFactor = this.config.initialScale;
-                if (dist < (effector.radius || 100)) {
-                    const t = 1 - distRatio;
-                    // Use a gentler easing for scale as well (quintic instead of cubic)
-                    const smoothT = t * t * t * t * t; 
+                
+                // Extend the scale effect to a larger radius (1.5x the normal radius)
+                const scaleRadius = (effector.radius || 100) * 1.5;
+                
+                if (dist < scaleRadius) {
+                    // Calculate the ratio based on the extended scale radius
+                    const scaleRatio = dist / scaleRadius;
+                    const t = 1 - scaleRatio;
+                    
+                    // Use a more gradual falloff for scale effect
+                    // This keeps more tiles at larger scale before falling off
+                    const smoothT = Math.pow(t, 2); // Quadratic falloff for gentler transition
+                    
                     const maxEffectorScale = effector.maxScale || this.config.maxScale;
                     scaleFactor = this.config.initialScale + 
                                   smoothT * (maxEffectorScale - this.config.initialScale);
