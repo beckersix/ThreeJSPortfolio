@@ -12,6 +12,20 @@ function CameraController(camera, target) {
     this.smoothing = 0.05; // Camera movement smoothing factor
     this.currentPosition = new THREE.Vector3();
     this.currentLookAt = new THREE.Vector3();
+    
+    // Mouse movement parameters
+    this.mouseRotation = {
+        enabled: true,
+        yaw: 0,         // Horizontal rotation
+        pitch: 0,       // Vertical rotation
+        sensitivity: 0.0005, // How sensitive the rotation is to mouse movement
+        maxYaw: 0.05,   // Maximum yaw rotation in radians (about 3 degrees)
+        maxPitch: 0.03, // Maximum pitch rotation in radians (about 1.7 degrees)
+        damping: 0.95   // Damping factor (lower = more responsive, higher = smoother)
+    };
+    
+    // Initialize mouse movement tracking
+    this._initMouseTracking();
 }
 
 // Initialize the camera controller
@@ -23,6 +37,37 @@ CameraController.prototype.init = function() {
     // Store initial positions
     this.currentPosition.copy(this.camera.position);
     this.currentLookAt.set(0, 0, 0);
+};
+
+// Initialize mouse movement tracking
+CameraController.prototype._initMouseTracking = function() {
+    const self = this;
+    
+    // Track mouse movement across the entire window
+    window.addEventListener('mousemove', function(event) {
+        if (!self.mouseRotation.enabled) return;
+        
+        // Calculate mouse movement as a percentage of window size
+        // This makes the effect consistent regardless of window size
+        const movementX = event.movementX || 0;
+        const movementY = event.movementY || 0;
+        
+        // Apply sensitivity and update rotation values
+        // Apply damping to make movements smoother
+        self.mouseRotation.yaw += movementX * self.mouseRotation.sensitivity;
+        self.mouseRotation.pitch += movementY * self.mouseRotation.sensitivity;
+        
+        // Clamp values to max rotation limits
+        self.mouseRotation.yaw = Math.max(-self.mouseRotation.maxYaw, 
+                                  Math.min(self.mouseRotation.maxYaw, self.mouseRotation.yaw));
+        self.mouseRotation.pitch = Math.max(-self.mouseRotation.maxPitch, 
+                                    Math.min(self.mouseRotation.maxPitch, self.mouseRotation.pitch));
+    });
+    
+    // Reset rotation when mouse leaves window
+    window.addEventListener('mouseout', function() {
+        // Don't reset immediately, just start damping back to center
+    });
 };
 
 // Update camera position based on target and spline
@@ -87,6 +132,35 @@ CameraController.prototype.update = function(splineLoader, progress) {
         // Use the lookAhead property to control how far ahead to look
         const lookAtTarget = pathPosition.clone().add(new THREE.Vector3(0, 1, -this.offset.z * 0.1)); // Look ahead proportional to offset
         this.currentLookAt.lerp(lookAtTarget, horizontalSmoothing);
+        
+        // Apply mouse-based rotation to camera
+        if (this.mouseRotation.enabled) {
+            // Apply damping to gradually return to center when mouse stops moving
+            this.mouseRotation.yaw *= this.mouseRotation.damping;
+            this.mouseRotation.pitch *= this.mouseRotation.damping;
+            
+            // Create a rotation matrix for yaw (horizontal) rotation
+            const yawMatrix = new THREE.Matrix4().makeRotationY(this.mouseRotation.yaw);
+            
+            // Create a rotation matrix for pitch (vertical) rotation
+            // We use the camera's right vector as the axis for pitch rotation
+            const rightVector = new THREE.Vector3(1, 0, 0);
+            const pitchMatrix = new THREE.Matrix4().makeRotationAxis(rightVector, this.mouseRotation.pitch);
+            
+            // Create a vector from camera position to look target
+            const lookDirection = new THREE.Vector3().subVectors(this.currentLookAt, this.currentPosition);
+            
+            // Apply rotations to the look direction
+            lookDirection.applyMatrix4(yawMatrix);
+            lookDirection.applyMatrix4(pitchMatrix);
+            
+            // Calculate the new look target by adding the rotated direction to the camera position
+            const rotatedLookTarget = new THREE.Vector3().addVectors(this.currentPosition, lookDirection);
+            
+            // Update the current look target with the rotated one
+            this.currentLookAt.copy(rotatedLookTarget);
+        }
+        
         this.camera.up.set(0, 1, 0); // Ensure Y is always up
         this.camera.lookAt(this.currentLookAt);
         this.camera.rotation.z = 0; // Prevent camera roll

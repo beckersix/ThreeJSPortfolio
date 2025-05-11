@@ -10,8 +10,8 @@ class GridManager {
         // Configure grid options with defaults
         this.config = Object.assign({
             // Grid dimensions
-            gridSizeX: 550,
-            gridSizeZ: 550,
+            gridSizeX: 350,
+            gridSizeZ: 500,
             spacing: 1.6,
             baseHeight: -18,
             gridX: 0,
