@@ -10,9 +10,9 @@ class GridManager {
         // Configure grid options with defaults
         this.config = Object.assign({
             // Grid dimensions
-            gridSizeX: 350,
-            gridSizeZ: 500,
-            spacing: 1.6,
+            gridSizeX: 200,     // Reduced from 350 for better performance
+            gridSizeZ: 300,     // Reduced from 500 for better performance
+            spacing: 2.0,       // Increased from 1.6 to spread out cubes more
             baseHeight: -18,
             gridX: 0,
             gridZ: -50,
@@ -30,9 +30,19 @@ class GridManager {
             effectorHeight: 15,        // Maximum height effect from effectors
             
             // Performance settings
-            batchSize: 300,
-            initialFalloff: 0.00000001
+            batchSize: 500,    // Increased from 300 for faster loading
+            initialFalloff: 0.00000001,
+            
+            // Optimization settings
+            cullingDistance: 150,      // Distance beyond which cubes aren't processed
+            updateInterval: 2,         // Only update every N frames
+            maxCubesPerFrame: 2000,    // Maximum cubes to process per frame
+            lodFactor: 1.5,            // Level of detail factor (higher = more aggressive culling)
+            useSimpleMaterial: true    // Use simpler material for better performance
         }, options);
+        
+        // Frame counter for update interval
+        this._frameCounter = 0;
         
         // Set up collections
         this.cubes = {};          // All cube data indexed by key
