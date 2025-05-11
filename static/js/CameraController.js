@@ -18,10 +18,10 @@ function CameraController(camera, target) {
         enabled: true,
         yaw: 0,         // Horizontal rotation
         pitch: 0,       // Vertical rotation
-        sensitivity: 0.0005, // How sensitive the rotation is to mouse movement
-        maxYaw: 0.05,   // Maximum yaw rotation in radians (about 3 degrees)
-        maxPitch: 0.03, // Maximum pitch rotation in radians (about 1.7 degrees)
-        damping: 0.95   // Damping factor (lower = more responsive, higher = smoother)
+        sensitivity: 0.000005, // How sensitive the rotation is to mouse movement
+        maxYaw: 0.01,   // Maximum yaw rotation in radians (about 3 degrees)
+        maxPitch: 0.01, // Maximum pitch rotation in radians (about 1.7 degrees)
+        damping: 0.7   // Damping factor (lower = more responsive, higher = smoother)
     };
     
     // Initialize mouse movement tracking
