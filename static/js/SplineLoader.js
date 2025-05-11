@@ -26,13 +26,68 @@ SplineLoader.prototype.loadOBJModel = function(url, callback) {
         this.objLoader = new THREE.OBJLoader();
     }
     this.objLoader.load(url, function(object) {
+        // Before adding to scene, apply materials with different colors but same properties as cubes
+        // Define a set of vibrant colors to use for objects
+        const colors = [
+            0x00ffcc, // Original cube color
+            0xff1493, // Deep pink
+            0x4169e1, // Royal blue
+            0xff8c00, // Dark orange
+            0x32cd32, // Lime green
+            0x9932cc, // Dark orchid
+            0xff4500, // Orange red
+            0x00bfff, // Deep sky blue
+            0xffff00, // Yellow
+            0x00ff7f  // Spring green
+        ];
+        
+        let colorIndex = 0;
+        
+        // Recursively traverse the object tree and apply materials
+        function applyMaterials(obj) {
+            // Skip the camera path object as it should remain invisible
+            if (obj.name === 'camera_path') {
+                obj.visible = false; // Hide camera path
+                return;
+            }
+            
+            // Only apply material to meshes with geometry
+            if (obj.type === 'Mesh' && obj.geometry) {
+                // Pick a color from our palette and cycle through them
+                const color = colors[colorIndex % colors.length];
+                colorIndex++;
+                
+                // Create a new material with the same properties as our cubes
+                const material = new THREE.MeshStandardMaterial({
+                    color: color,
+                    roughness: 0.5,
+                    metalness: 0.8
+                });
+                
+                // Apply this material to the object
+                obj.material = material;
+                console.log(`Applied color ${color.toString(16)} to ${obj.name}`);
+            }
+            
+            // Process children recursively
+            if (obj.children && obj.children.length > 0) {
+                obj.children.forEach(child => applyMaterials(child));
+            }
+        }
+        
+        // Apply materials to all objects
+        applyMaterials(object);
+        
+        // Now add to scene
         self.scene.add(object);
+        
         // Log all object names and types in the OBJ hierarchy
         function logNames(obj, depth = 0) {
             console.log(' '.repeat(depth * 2) + obj.name + ' (' + obj.type + ')');
             if (obj.children) obj.children.forEach(child => logNames(child, depth + 1));
         }
         logNames(object);
+        
         // Find 'camera_path' and extract points
         const cameraPathObj = self._findObjectByName(object, 'camera_path');
         if (cameraPathObj && cameraPathObj.geometry) {
@@ -44,6 +99,7 @@ SplineLoader.prototype.loadOBJModel = function(url, callback) {
                 self.cameraPath = new THREE.CatmullRomCurve3(self.pathPoints);
             }
         }
+        
         if (cameraPathObj) {
             console.log('camera_path object:', cameraPathObj);
             if (cameraPathObj.geometry) {
@@ -58,6 +114,7 @@ SplineLoader.prototype.loadOBJModel = function(url, callback) {
                 console.log('camera_path has no geometry');
             }
         }
+        
         if (callback) callback(self);
     }, undefined, function(error) {
         if (callback) callback(null, error);

@@ -286,11 +286,29 @@ SceneController.prototype.setupLighting = function() {
 
 // Create player object (cone)
 SceneController.prototype.createPlayer = function() {
-    const coneGeometry = new THREE.ConeGeometry(0.5, 1, 16);
-    const coneMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+    // Larger cone geometry (5x larger)
+    const coneGeometry = new THREE.ConeGeometry(2.5, 5, 24);
+    
+    // Brighter and more reflective material
+    const coneMaterial = new THREE.MeshStandardMaterial({ 
+        color: 0xff0000,
+        emissive: 0x330000,  // Slight emissive glow
+        metalness: 0.7,      // More metallic look
+        roughness: 0.2       // Smoother surface for more reflections
+    });
+    
     this.player = new THREE.Mesh(coneGeometry, coneMaterial);
-    this.player.position.set(0, 0, 0);
+    this.player.position.set(0, 2.5, 0); // Lifted up a bit so it doesn't sink into the grid
     this.player.rotation.x = Math.PI; // Pointing forward
+    
+    // Add a subtle point light attached to the player
+    const playerLight = new THREE.PointLight(0xff3333, 1, 20);
+    playerLight.position.set(0, 1, 0);
+    this.player.add(playerLight);
+    
+    // Cast shadows
+    this.player.castShadow = true;
+    
     this.scene.add(this.player);
 };
 
@@ -319,7 +337,7 @@ SceneController.prototype.createCubes = function() {
     const halfZ = (gridSizeZ - 1) * spacing / 2;
     const size = .8;
     const color = 0x00ffcc;
-    const gridY = -25; // Base grid height
+    const gridY = -15; // Base grid height
     const gridZ = -50;
     const gridX = 0;
     const InitialFalloff = 0.00000001;
@@ -426,7 +444,7 @@ SceneController.prototype.createCubes = function() {
                 // Calculate height as a blend between grid base and spline-relative height
                 // This makes terrain come up closer to the spline but still follow its contour
                 const maxRaise = 25; // Maximum height raise
-                const raise = smoothFalloff * maxRaise;
+                const raise = smoothFalloff;
                 
                 // Apply the height effect - blend between grid base and spline-relative height
                 baseY = gridY + raise;
@@ -445,6 +463,8 @@ SceneController.prototype.createCubes = function() {
             
             // Set initial matrix - using the dummy object for better performance
             dummy.position.set(px, baseY, pz);
+            // Set initial scale to 0.2 for all cubes
+            dummy.scale.set(0.2, 0.2, 0.2);
             dummy.updateMatrix();
             this.cubeInstancedMesh.setMatrixAt(currentIndex, dummy.matrix);
         }
@@ -738,27 +758,31 @@ SceneController.prototype.animate = function() {
             const dx = cube.x - effectCenter.x;
             const dz = cube.z - effectCenter.z;
             const distSq = dx*dx + dz*dz;
-            
-            // Only calculate actual distance when needed
             const dist = Math.sqrt(distSq);
             
+            // Calculate distance to camera for both lifting and scaling effects
+            const dxCamera = cube.x - camera.x;
+            const dzCamera = cube.z - camera.z;
+            const distToCamera = Math.sqrt(dxCamera*dxCamera + dzCamera*dzCamera);
+            
+            // Mark this cube as processed
             processed.add(cube.i);
             
-            // Massively wide falloff that spans the entire visible area
-            if (dist < effectRadius) {
-                // Use a much gentler falloff for smoother, less intense camera effect
-                // Lower coefficient = gentler, more gradual falloff
-                const falloff = 1 / (1 + 0.00005 * dist * dist); // Extra gentle falloff for smoother effect
+            // Increased player effect radius for a better terrain wave
+            const playerEffectRadius = 100; // Wider player-based lifting radius
+            
+            // Height effect based ONLY on player proximity
+            if (dist < playerEffectRadius) {
+                // Calculate falloff based on distance to player (cone)
+                const playerFalloff = 1 / (1 + 0.0005 * dist * dist);
                 
                 // Apply triple smoothstep for ultra-smooth transitions
-                let smoothFalloff = falloff * falloff * (3 - 2 * falloff);
-                // Apply second smoothstep
-                smoothFalloff = smoothFalloff * smoothFalloff * (3 - 2 * smoothFalloff);
-                // Apply third smoothstep for even smoother transitions
+                let smoothFalloff = playerFalloff * playerFalloff * (3 - 2 * playerFalloff);
+                // Additional smoothing for even softer transitions
                 smoothFalloff = smoothFalloff * smoothFalloff * (3 - 2 * smoothFalloff);
                 
-                // Calculate maximum height raise with reduced intensity
-                const maxRaise = 20; // Slightly reduced for less intense effect
+                // Height calculation based ONLY on player proximity
+                const maxRaise = 15; // Maximum height raise
                 const raise = smoothFalloff * maxRaise;
                 
                 // Get current path position to ensure we don't exceed spline height
@@ -776,30 +800,26 @@ SceneController.prototype.animate = function() {
                     }
                 }
                 
-                const splineHeight = this._cachedSplineHeight;
-                
-                // Apply the height effect but ensure it doesn't exceed spline height
-                const playerHeight = Math.min(cube.baseY + raise, splineHeight - 1);
-                
-                // Calculate distance to camera for scaling effect
-                const dxCamera = cube.x - camera.x;
-                const dzCamera = cube.z - camera.z;
-                const distToCamera = Math.sqrt(dxCamera*dxCamera + dzCamera*dzCamera);
-                
-                // Scale based on camera proximity (100 units threshold)
-                const scaleThreshold = 100;
-                const minScale = .8;
+                // Define scale parameters for cube scaling based on PLAYER proximity
+                const scaleThreshold = 40; // Player-based scale threshold
+                const minScale = .2;
                 const maxScale = 2;
                 
-                // Calculate scale factor - closer = larger
+                // Calculate scale factor - closer to player = larger
                 let scaleFactor = minScale;
-                if (distToCamera < scaleThreshold) {
+                if (dist < scaleThreshold) {
                     // Linear interpolation from minScale to maxScale
-                    const t = 1 - (distToCamera / scaleThreshold); // 0 at threshold, 1 at camera
+                    const t = 1 - (dist / scaleThreshold); // 0 at threshold, 1 at player
                     // Apply smoothstep for nicer transition
                     const smoothT = t * t * (3 - 2 * t);
                     scaleFactor = minScale + smoothT * (maxScale - minScale);
                 }
+                
+                // Calculate the spline height
+                const splineHeight = this._cachedSplineHeight;
+                
+                // Apply the height effect but ensure it doesn't exceed spline height
+                const playerHeight = Math.min(cube.baseY + raise, splineHeight - 1);
                 
                 // Apply position and scale
                 dummy.position.set(cube.x, playerHeight, cube.z);
@@ -807,23 +827,18 @@ SceneController.prototype.animate = function() {
                 dummy.updateMatrix();
                 this.cubeInstancedMesh.setMatrixAt(cube.i, dummy.matrix);
             } else {
-                // Outside effect radius - restore to original height but maintain camera-based scaling
+                // Outside effect radius - restore to original height but apply player-based scaling
                 
-                // Calculate distance to camera for scaling effect
-                const dxCamera = cube.x - camera.x;
-                const dzCamera = cube.z - camera.z;
-                const distToCamera = Math.sqrt(dxCamera*dxCamera + dzCamera*dzCamera);
+                // Define scale parameters for player-based scaling (wider range than height effect)
+                const scaleThreshold = 60; // Wider range for scaling effect
+                const minScale = .2;
+                const maxScale = 1.0; // Slightly smaller maximum scale for distant cubes
                 
-                // Scale based on camera proximity (100 units threshold)
-                const scaleThreshold = 100;
-                const minScale = 1.0;
-                const maxScale = 1.5;
-                
-                // Calculate scale factor - closer = larger
+                // Calculate scale factor based on player distance
                 let scaleFactor = minScale;
-                if (distToCamera < scaleThreshold) {
+                if (dist < scaleThreshold) {
                     // Linear interpolation from minScale to maxScale
-                    const t = 1 - (distToCamera / scaleThreshold); // 0 at threshold, 1 at camera
+                    const t = 1 - (dist / scaleThreshold); // 0 at threshold, 1 at player
                     // Apply smoothstep for nicer transition
                     const smoothT = t * t * (3 - 2 * t);
                     scaleFactor = minScale + smoothT * (maxScale - minScale);

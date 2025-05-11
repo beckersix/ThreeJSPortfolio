@@ -7,7 +7,7 @@
 function CameraController(camera, target) {
     this.camera = camera;
     this.target = target; // The object to follow (e.g., cone)
-    this.offset = new THREE.Vector3(0, 5, 25); // Default camera offset
+    this.offset = new THREE.Vector3(0, 5, 45); // Default camera offset
     this.lookAhead = 0.01; // How far ahead to look
     this.smoothing = 0.05; // Camera movement smoothing factor
     this.currentPosition = new THREE.Vector3();
