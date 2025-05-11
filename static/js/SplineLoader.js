@@ -53,22 +53,48 @@ SplineLoader.prototype.loadOBJModel = function(url, callback) {
                 return;
             }
             
+            // Check if this is a road object
+            const isRoad = obj.name && (
+                obj.name.toLowerCase().includes('road') ||
+                obj.name.toLowerCase().includes('path') ||
+                obj.name.toLowerCase().includes('track') ||
+                obj.name.toLowerCase().includes('street')
+            );
+            
             // Only apply material to meshes with geometry
             if (obj.type === 'Mesh' && obj.geometry) {
-                // Pick a color from our palette and cycle through them
-                const color = colors[colorIndex % colors.length];
-                colorIndex++;
+                let material;
                 
-                // Create a new material with the same properties as our cubes
-                const material = new THREE.MeshStandardMaterial({
-                    color: color,
-                    roughness: 0.5,
-                    metalness: 0.8
-                });
+                if (isRoad) {
+                    // Apply rough black material for the road
+                    material = new THREE.MeshStandardMaterial({
+                        color: 0x0a0a0a, // Very dark black
+                        roughness: 0.9,   // Very rough
+                        metalness: 0.1,   // Low metalness
+                        envMapIntensity: 0.2, // Low reflection
+                    });
+                    
+                    // Make the road receive shadows
+                    obj.receiveShadow = true;
+                    
+                    console.log(`Applied rough black material to road: ${obj.name}`);
+                } else {
+                    // For non-road objects, use the original color scheme
+                    const color = colors[colorIndex % colors.length];
+                    colorIndex++;
+                    
+                    // Create a new material with the same properties as our cubes
+                    material = new THREE.MeshStandardMaterial({
+                        color: color,
+                        roughness: 0.5,
+                        metalness: 0.8
+                    });
+                    
+                    console.log(`Applied color ${color.toString(16)} to ${obj.name}`);
+                }
                 
-                // Apply this material to the object
+                // Apply the material to the object
                 obj.material = material;
-                console.log(`Applied color ${color.toString(16)} to ${obj.name}`);
             }
             
             // Process children recursively
