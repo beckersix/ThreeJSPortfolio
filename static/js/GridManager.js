@@ -541,52 +541,125 @@ class GridManager {
         // This makes the wave animation independent of player position
         this.time += 0.01; // Fixed increment for consistent wave speed
         
+        // Find player effector for distance-based culling
+        let playerPosition = null;
+        const playerEffector = this.effectors.find(e => e.id === 'player');
+        if (playerEffector && playerEffector.position) {
+            playerPosition = playerEffector.position;
+        }
+        
+        // If no player found, try to find any active effector to use as reference
+        if (!playerPosition) {
+            const anyEffector = this.effectors.find(e => e.active && e.position);
+            if (anyEffector) {
+                playerPosition = anyEffector.position;
+            }
+        }
+        
+        // Define the maximum distance for cube updates
+        // This is the key optimization - we only process cubes within this distance
+        const maxUpdateDistance = 120; // Units in world space
+        const maxUpdateDistanceSq = maxUpdateDistance * maxUpdateDistance; // Square for faster comparison
+        
         // Find cubes that need to be processed
         const cubesToProcess = new Set();
         const dummy = new THREE.Object3D();
         
-        // Ensure all effectors have visualizers and are positioned correctly
-        this.effectors.forEach(effector => {
-            if (effector.visualize !== false) {
-                // Create visualizer if it doesn't exist
-                if (!this.visualizers[effector.id]) {
-                    this.createEffectorVisualizer(effector);
-                }
-                
-                // Update visualizer position to match effector
-                if (this.visualizers[effector.id] && effector.position) {
-                    this.visualizers[effector.id].position.copy(effector.position);
-                }
-            }
-        });
+        // Update visualizers only every few frames to save performance
+        if (!this._frameCounter) this._frameCounter = 0;
+        this._frameCounter++;
         
-        // First add cubes near each effector
-        for (const effector of this.effectors) {
-            if (!effector.active) continue;
-            
-            // Make sure position is valid
-            if (!effector.position || isNaN(effector.position.x) || isNaN(effector.position.z)) {
-                console.error('Invalid effector position:', effector);
-                continue;
-            }
-            
-            // Use a larger radius to ensure we catch all affected cubes
-            const queryRadius = (effector.radius || 100) * 1.2;
-            
-            // Query cubes around this effector
+        if (this._frameCounter % 3 === 0) { // Update visualizers every 3 frames
+            // Ensure all effectors have visualizers and are positioned correctly
+            this.effectors.forEach(effector => {
+                if (effector.visualize !== false) {
+                    // Create visualizer if it doesn't exist
+                    if (!this.visualizers[effector.id]) {
+                        this.createEffectorVisualizer(effector);
+                    }
+                    
+                    // Update visualizer position to match effector
+                    if (this.visualizers[effector.id] && effector.position) {
+                        this.visualizers[effector.id].position.copy(effector.position);
+                    }
+                }
+            });
+        }
+        
+        // If we have a player position, only query cubes near the player
+        if (playerPosition) {
+            // Query cubes around the player with the maximum update distance
             const nearbyCubes = this.quadTree.query({
-                x: effector.position.x,
-                z: effector.position.z,
-                radius: queryRadius
+                x: playerPosition.x,
+                z: playerPosition.z,
+                radius: maxUpdateDistance
             });
             
-            // Update visualizer position if it exists
-            if (this.visualizers[effector.id]) {
-                this.visualizers[effector.id].position.copy(effector.position);
-            }
-            
-            // Add to processing set (auto-deduplicates)
+            // Add these cubes to the processing set
             nearbyCubes.forEach(cube => cubesToProcess.add(cube.key));
+            
+            // Now add additional cubes that are near active effectors (within their radius)
+            for (const effector of this.effectors) {
+                if (!effector.active || effector.id === 'player') continue; // Skip player, already processed
+                
+                // Make sure position is valid
+                if (!effector.position || isNaN(effector.position.x) || isNaN(effector.position.z)) {
+                    console.error('Invalid effector position:', effector);
+                    continue;
+                }
+                
+                // Check if this effector is close enough to the player to be relevant
+                const dx = effector.position.x - playerPosition.x;
+                const dz = effector.position.z - playerPosition.z;
+                const distSq = dx*dx + dz*dz;
+                
+                // Only process effectors that are within the player's view distance + their radius
+                if (distSq > (maxUpdateDistance + effector.radius) * (maxUpdateDistance + effector.radius)) {
+                    continue; // Skip effectors too far from player
+                }
+                
+                // Use the effector's radius to query cubes
+                const queryRadius = (effector.radius || 100) * 1.2;
+                
+                // Query cubes around this effector
+                const nearbyCubes = this.quadTree.query({
+                    x: effector.position.x,
+                    z: effector.position.z,
+                    radius: queryRadius
+                });
+                
+                // Update visualizer position if it exists
+                if (this._frameCounter % 3 === 0 && this.visualizers[effector.id]) {
+                    this.visualizers[effector.id].position.copy(effector.position);
+                }
+                
+                // Add to processing set (auto-deduplicates)
+                nearbyCubes.forEach(cube => cubesToProcess.add(cube.key));
+            }
+        } else {
+            // Fallback if no player position: process cubes near all active effectors
+            for (const effector of this.effectors) {
+                if (!effector.active) continue;
+                
+                // Make sure position is valid
+                if (!effector.position || isNaN(effector.position.x) || isNaN(effector.position.z)) {
+                    console.error('Invalid effector position:', effector);
+                    continue;
+                }
+                
+                // Use a larger radius to ensure we catch all affected cubes
+                const queryRadius = (effector.radius || 100) * 1.2;
+                
+                // Query cubes around this effector
+                const nearbyCubes = this.quadTree.query({
+                    x: effector.position.x,
+                    z: effector.position.z,
+                    radius: queryRadius
+                });
+                
+                // Add to processing set (auto-deduplicates)
+                nearbyCubes.forEach(cube => cubesToProcess.add(cube.key));
+            }
         }
         
         // Process each cube

@@ -40,10 +40,15 @@ function SceneController() {
 
 // Initialize the scene
 SceneController.prototype.init = function() {
+    console.log('Initializing SceneController...');
+    
     // Update preloader status
     this.updatePreloader(5, 'Creating scene...');
     
-    if (this.initialized) return;
+    if (this.initialized) {
+        console.log('SceneController already initialized, skipping initialization');
+        return;
+    }
     
     // Create scene
     this.scene = new THREE.Scene();
@@ -61,8 +66,8 @@ SceneController.prototype.init = function() {
     //gridHelper.position.y = 0;
     //this.scene.add(gridHelper);
     
-    // Create camera
-    this.camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1000);
+    // Create camera with extended far plane to see distant objects
+    this.camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 10000);
     this.camera.position.set(0, 50, 2080); // Higher and further back
     this.camera.lookAt(0, -10, 0); // Tilt downward
     
@@ -101,6 +106,41 @@ SceneController.prototype.init = function() {
     // Path to your OBJ file - using the existing Scene.obj file
     const objPath = './static/models/Scene.obj';
     
+    const self = this; // Store reference to this for use in callbacks
+    
+    // Create camera controller early so controls can access it
+    this.updatePreloader(50, 'Setting up camera...');
+    this.cameraController = new CameraController(this.camera, this.player);
+    this.cameraController.init();
+    
+    // Set up event listeners
+    this.updatePreloader(60, 'Setting up event handlers...');
+    this.setupEventListeners();
+    
+    // Load environment map
+    this.updatePreloader(30, 'Loading environment...');
+    this.loadHDRIEnvironment();
+    
+    // Create test effectors
+    this.updatePreloader(40, 'Creating test effectors...');
+    this.createTestEffectors();
+    
+    // Start animation loop
+    this.updatePreloader(70, 'Starting animation loop...');
+    this.animate();
+    
+    // Mark as initialized early to allow controls to connect
+    // We'll still load the OBJ model in the background
+    this.initialized = true;
+    console.log('Scene controller core components initialized');
+    
+    // Dispatch an event to notify that the core components are initialized
+    const initEvent = new CustomEvent('sceneInitialized', {
+        detail: { sceneController: this }
+    });
+    window.dispatchEvent(initEvent);
+    
+    // Load the OBJ model asynchronously
     this.splineLoader.loadOBJModel(objPath, (loader, error) => {
         if (error) {
             console.error('Failed to load OBJ model:', error);
@@ -108,39 +148,33 @@ SceneController.prototype.init = function() {
             console.log('OBJ model loaded successfully');
             // If the model has a camera path, use it
             if (loader && loader.cameraPath) {
-                console.log('Using camera path from OBJ model');
-                // Keep a reference to the loaded camera path
-                this.objCameraPath = loader.cameraPath;
-                
-                // Log path details for debugging
-                console.log('Camera path points:', loader.cameraPath.points ? loader.cameraPath.points.length : 'none');
-                console.log('First point:', loader.cameraPath.points ? loader.cameraPath.points[0] : 'none');
-                console.log('Last point:', loader.cameraPath.points ? loader.cameraPath.points[loader.cameraPath.points.length-1] : 'none');
-                
-                // Update GridManager with camera path if necessary
-                if (this.gridManager) {
-                    this.gridManager.cameraPath = this.objCameraPath;
-                }
-            } else {
-                console.error('No camera path found in OBJ model');
+                self.objCameraPath = loader.cameraPath;
+                console.log('Camera path loaded from OBJ model');
             }
+            
+            // Hide preloader when everything is ready
+            self.updatePreloader(100, 'Ready!');
+            setTimeout(() => self.hidePreloader(), 500);
+            
+            console.log('Scene controller fully loaded with OBJ model');
+            
+            // Dispatch an event to notify that everything is fully loaded
+            const loadedEvent = new CustomEvent('sceneFullyLoaded', {
+                detail: { sceneController: self }
+            });
+            window.dispatchEvent(loadedEvent);
         }
-        
-        // After model loads, add test effectors
-        this.createTestEffectors();
     });
-    
-    // Configure camera controller for interaction
-    this.cameraController = new CameraController(this.camera, this.player);
-    
-    // Setup animation loop
-    this.animate();
     
     // Add window resize handler
     window.addEventListener('resize', this.onWindowResize.bind(this));
     
     // Set up event listeners
     this.setupEventListeners();
+    
+    // Initialize UI Controller
+    this.updatePreloader(95, 'Setting up UI controls...');
+    this.uiController = new UIController(this, this.cameraController, this.gridManager);
     
     // Mark as initialized
     this.initialized = true;
@@ -298,34 +332,6 @@ SceneController.prototype.loadHDRIEnvironment = function() {
         self.createProceduralEnvironment();
     });
     
-    // Also try to create a cube map for better reflections
-    this.createCubeMapEnvironment(params);
-};
-
-// Create a cube map environment for better reflections
-SceneController.prototype.createCubeMapEnvironment = function(params) {
-    const self = this;
-    
-    // Create a cube texture loader
-    const cubeTextureLoader = new THREE.CubeTextureLoader();
-    
-    // Path to cube map images (if available)
-    const path = './static/cubemap/';
-    const format = '.jpg';
-    const urls = [
-        path + 'px' + format, path + 'nx' + format,
-        path + 'py' + format, path + 'ny' + format,
-        path + 'pz' + format, path + 'nz' + format
-    ];
-    
-    // Try to load the cube map
-    cubeTextureLoader.load(urls, function(cubeTexture) {
-        // Set as environment map for reflections
-        self.scene.environment = cubeTexture;
-        console.log('Cube map environment loaded successfully');
-    }, undefined, function(error) {
-        console.log('Cube map not available, using equirectangular map instead');
-    });
 };
 
 // Update all materials in the scene to match UltraHDR example settings
