@@ -9,6 +9,7 @@ function SplineLoader(scene) {
     this.objLoader = null; // Lazy init
     this.cameraPath = null;
     this.pathPoints = [];
+    this.effectors = []; // Initialize the effectors array
 }
 
 // Returns a point on the camera path at parameter t (0 to 1)
@@ -86,8 +87,15 @@ SplineLoader.prototype.loadOBJModel = function(url, callback) {
             console.log(' '.repeat(depth * 2) + obj.name + ' (' + obj.type + ')');
             if (obj.children) obj.children.forEach(child => logNames(child, depth + 1));
         }
+        SplineLoader.prototype.logNames = logNames;
         logNames(object);
         
+        // Find all effectors in the scene and store them
+        if (!self.effectors) {
+            self.effectors = [];
+        }
+        self.findEffectors(object);
+            
         // Find 'camera_path' and extract points
         const cameraPathObj = self._findObjectByName(object, 'camera_path');
         if (cameraPathObj && cameraPathObj.geometry) {
@@ -150,6 +158,84 @@ SplineLoader.prototype._extractPoints = function(obj) {
         });
     }
     return points;
+};
+
+// Find all objects named 'effector' or 'effector.XXX' in the loaded model
+SplineLoader.prototype.findEffectors = function(object) {
+    // We only want to clear once at the beginning of the model loading process
+    // This static flag ensures we're not clearing the array during recursive calls
+    if (!SplineLoader._effectorSearchInitialized) {
+        console.log('Starting new effector search, clearing previous effectors');
+        this.effectors = [];
+        SplineLoader._effectorSearchInitialized = true;
+        
+        // Reset this flag when loading is completed (after a delay)
+        setTimeout(() => {
+            SplineLoader._effectorSearchInitialized = false;
+            console.log('Effector search completed, found', this.effectors.length, 'effectors');
+            this.effectors.forEach(e => console.log(' -', e.name));
+        }, 1000);
+    }
+    
+    // Check for various effector naming patterns - be more flexible with detection
+    if (object.name && (
+        object.name === 'effector' || 
+        object.name.startsWith('effector.') ||
+        object.name.startsWith('Effector') ||
+        object.name.toLowerCase().includes('effector') ||
+        object.name.toLowerCase().includes('effect') ||
+        object.name.toLowerCase().includes('emitter')
+    )) {
+        // Convert to world coordinates if needed
+        object.updateMatrixWorld(true);
+        const worldPosition = new THREE.Vector3();
+        worldPosition.setFromMatrixPosition(object.matrixWorld);
+        
+        console.log('Found effector:', object.name);
+        console.log('  Local position:', object.position.x, object.position.y, object.position.z);
+        console.log('  World position:', worldPosition.x, worldPosition.y, worldPosition.z);
+        
+        this.effectors.push({
+            name: object.name,
+            position: worldPosition, // Use world position instead of local
+            object: object
+        });
+        
+        // Make the effector visible with a distinct material
+        if (object.type === 'Mesh') {
+            // Create a glowing material for the effector
+            const effectorMaterial = new THREE.MeshStandardMaterial({
+                color: 0x00ffff,
+                emissive: 0x00aaaa,
+                metalness: 0.9,
+                roughness: 0.1
+            });
+            object.material = effectorMaterial;
+            
+            // Add a point light
+            const effectorLight = new THREE.PointLight(0x00ffff, 1, 20);
+            effectorLight.position.set(0, 1, 0);
+            object.add(effectorLight);
+        }
+    }
+    
+    // Recursively check all children
+    if (object.children && object.children.length > 0) {
+        object.children.forEach(child => {
+            this.findEffectors(child);
+        });
+    }
+};
+
+// Get stored effectors
+SplineLoader.prototype.getEffectors = function() {
+    if (!this.effectors) {
+        console.warn('Effectors array is undefined, initializing empty array');
+        this.effectors = [];
+    }
+    
+    console.log(`Returning ${this.effectors.length} effectors from SplineLoader`);
+    return this.effectors;
 };
 
 // Creates a simple sine wave spline for testing
