@@ -56,7 +56,7 @@ SceneController.prototype.init = function() {
     // Add atmospheric fog for depth and mood
     // Using a lighter fog that works well with HDRI
     const fogColor = new THREE.Color(0x89a7c2);  // Soft blue-gray color
-    this.scene.fog = new THREE.FogExp2(fogColor, 0.002);  // Reduced density for HDRI compatibility
+    this.scene.fog = new THREE.FogExp2(fogColor, 0.007);  // Reduced density for HDRI compatibility
     
     // Create camera with extended far plane to see distant objects
     this.camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 10000);
@@ -211,8 +211,8 @@ SceneController.prototype.initializeGridManager = function() {
     
     // Configure GridManager
     const gridOptions = {
-        gridSizeX: 550,
-        gridSizeZ: 550,
+        gridSizeX: 350,
+        gridSizeZ: 1000,
         spacing: 1.6,
         baseHeight: -15,
         gridX: 0,
@@ -250,7 +250,7 @@ SceneController.prototype.initializeGridManager = function() {
             id: 'player',
             name: 'Player',
             position: this.player.position,
-            radius: 100,
+            radius: 40,
             maxRaise: 15,
             maxScale: 2.0,
             active: true,

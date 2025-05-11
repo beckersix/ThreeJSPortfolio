@@ -867,6 +867,46 @@ function updatePerformanceUI(gridManager) {
         intervalValue.textContent = gridManager.config.updateInterval;
     }
     
+    // Update additional performance metrics if available
+    const performanceMetrics = gridManager.getPerformanceMetrics ? gridManager.getPerformanceMetrics() : null;
+    
+    if (performanceMetrics) {
+        // Update live performance stats in the UI
+        const totalCubesElement = document.getElementById('total-cubes-stat');
+        const queriedCubesElement = document.getElementById('queried-cubes-stat');
+        const processedCubesElement = document.getElementById('processed-cubes-stat');
+        const updateRatioElement = document.getElementById('update-ratio-stat');
+        
+        if (totalCubesElement) {
+            totalCubesElement.textContent = performanceMetrics.totalCubes.toLocaleString();
+        }
+        
+        if (queriedCubesElement) {
+            queriedCubesElement.textContent = performanceMetrics.cubesQueried.toLocaleString();
+        }
+        
+        if (processedCubesElement) {
+            processedCubesElement.textContent = performanceMetrics.cubesProcessed.toLocaleString();
+        }
+        
+        if (updateRatioElement && performanceMetrics.totalCubes > 0) {
+            const updateRatio = ((performanceMetrics.cubesProcessed / performanceMetrics.totalCubes) * 100).toFixed(2);
+            updateRatioElement.textContent = `${updateRatio}%`;
+        }
+    }
+    
+    // Update checkbox states
+    const frustumCullingCheckbox = document.getElementById('frustum-culling-enabled');
+    const distanceBasedUpdatesCheckbox = document.getElementById('distance-based-updates-enabled');
+    
+    if (frustumCullingCheckbox && gridManager.config.useCameraFrustumCulling !== undefined) {
+        frustumCullingCheckbox.checked = gridManager.config.useCameraFrustumCulling;
+    }
+    
+    if (distanceBasedUpdatesCheckbox && gridManager.config.useDistanceBasedUpdates !== undefined) {
+        distanceBasedUpdatesCheckbox.checked = gridManager.config.useDistanceBasedUpdates;
+    }
+    
     // Quality preset
     const qualitySelect = document.getElementById('quality-preset');
     
