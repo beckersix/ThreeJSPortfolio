@@ -148,93 +148,111 @@ class GridManager {
             const totalCubes = this.config.gridSizeX * this.config.gridSizeZ;
             console.log(`Creating grid of ${this.config.gridSizeX}x${this.config.gridSizeZ} = ${totalCubes} cubes`);
             
-            // Process batches of cubes
-            const processBatch = (ix, iz) => {
-                try {
-                    const batchSize = Math.min(this.config.gridSizeZ - iz, this.config.batchSize);
-                    const batchStartIndex = cubesCreated;
+            // Create a single matrix update buffer for better performance
+            // This avoids updating the instance matrix for every cube
+            const matrices = [];
+            const cubeData = [];
+            
+            // Pre-allocate all cube data at once instead of in batches
+            // This is much faster than creating cubes in small batches
+            console.time('Grid data generation');
+            
+            // Create all cube data in a single pass
+            for (let ix = 0; ix < this.config.gridSizeX; ix++) {
+                for (let iz = 0; iz < this.config.gridSizeZ; iz++) {
+                    // Calculate position
+                    const px = ix * this.config.spacing - halfX + this.config.gridX;
+                    const pz = iz * this.config.spacing - halfZ + this.config.gridZ;
+                    let baseY = this.config.baseHeight;
                     
-                    for (let i = 0; i < batchSize; i++) {
-                        const currentIz = iz + i;
-                        
-                        // Calculate position
-                        const px = ix * this.config.spacing - halfX + this.config.gridX;
-                        const pz = currentIz * this.config.spacing - halfZ + this.config.gridZ;
-                        let baseY = this.config.baseHeight;
-                        
-                        // Create cube data
-                        const key = `${ix}_${currentIz}`;
-                        const currentIndex = batchStartIndex + i;
-                        const cube = { 
-                            x: px, 
-                            z: pz, 
-                            baseY, 
-                            y: baseY, // Current y (may change with effects)
-                            i: currentIndex, 
-                            key,
-                            scale: this.config.initialScale,
-                            // Add additional physics properties
-                            velocity: 0,
-                            acceleration: 0,
-                            noise: 0
-                        };
-                        
-                        // Store and index the cube
-                        this.cubes[key] = cube;
-                        
-                        // Add to spatial index
-                        this.quadTree.insert(cube);
-                        
-                        // Set initial matrix
-                        dummy.position.set(px, baseY, pz);
-                        dummy.scale.set(this.config.initialScale, this.config.initialScale, this.config.initialScale);
-                        dummy.updateMatrix();
-                        this.instancedMesh.setMatrixAt(currentIndex, dummy.matrix);
+                    // Create cube data
+                    const key = `${ix}_${iz}`;
+                    const currentIndex = cubesCreated;
+                    const cube = { 
+                        x: px, 
+                        z: pz, 
+                        baseY, 
+                        y: baseY,
+                        i: currentIndex, 
+                        key,
+                        scale: this.config.initialScale,
+                        velocity: 0,
+                        acceleration: 0,
+                        noise: 0
+                    };
+                    
+                    // Store cube data
+                    this.cubes[key] = cube;
+                    cubeData.push(cube);
+                    
+                    // Create matrix
+                    dummy.position.set(px, baseY, pz);
+                    dummy.scale.set(this.config.initialScale, this.config.initialScale, this.config.initialScale);
+                    dummy.updateMatrix();
+                    
+                    // Store matrix
+                    matrices.push(dummy.matrix.clone());
+                    
+                    // Update counter
+                    cubesCreated++;
+                    
+                    // Report progress periodically
+                    if (cubesCreated % 1000 === 0 && onProgress) {
+                        const progress = Math.min(cubesCreated / totalCubes * 0.5, 0.5); // First 50%
+                        onProgress(progress);
                     }
-                    
-                    // Update instance matrix after each batch
-                    this.instancedMesh.instanceMatrix.needsUpdate = true;
-                    
-                    // Update progress counter
-                    cubesCreated += batchSize;
-                    const progress = Math.min(cubesCreated / totalCubes, 1);
-                    
+                }
+            }
+            console.timeEnd('Grid data generation');
+            
+            // Now insert all cubes into the quadtree at once
+            console.time('Quadtree insertion');
+            if (onProgress) onProgress(0.6); // 60%
+            
+            // Insert cubes into quadtree in batches to avoid blocking the main thread
+            const insertQuadtreeBatch = (startIdx, batchSize) => {
+                const endIdx = Math.min(startIdx + batchSize, cubeData.length);
+                
+                for (let i = startIdx; i < endIdx; i++) {
+                    this.quadTree.insert(cubeData[i]);
+                }
+                
+                if (endIdx < cubeData.length) {
                     // Report progress
                     if (onProgress) {
+                        const progress = 0.6 + (endIdx / cubeData.length) * 0.2; // 60-80%
                         onProgress(progress);
                     }
                     
-                    // Check if done or continue with next batch
-                    const isLastBatch = ix >= this.config.gridSizeX - 1 && 
-                                      iz + batchSize >= this.config.gridSizeZ;
+                    // Continue with next batch
+                    setTimeout(() => insertQuadtreeBatch(endIdx, batchSize), 0);
+                } else {
+                    // All cubes inserted into quadtree
+                    console.timeEnd('Quadtree insertion');
                     
-                    if (isLastBatch) {
-                        // Complete
-                        this.ready = true;
-                        if (onProgress) onProgress(1.0); // 100% complete
-                        console.log(`Grid creation complete. Created ${cubesCreated} cubes.`);
-                    } else {
-                        // Continue with next batch
-                        let nextIx = ix;
-                        let nextIz = iz + batchSize;
-                        
-                        if (nextIz >= this.config.gridSizeZ) {
-                            nextIx++;
-                            nextIz = 0;
-                        }
-                        
-                        // Schedule next batch (use requestAnimationFrame for better performance with rendering)
-                        requestAnimationFrame(() => processBatch(nextIx, nextIz));
+                    // Now update the instance matrices
+                    console.time('Matrix updates');
+                    if (onProgress) onProgress(0.8); // 80%
+                    
+                    // Update all matrices at once
+                    for (let i = 0; i < matrices.length; i++) {
+                        this.instancedMesh.setMatrixAt(i, matrices[i]);
                     }
-                } catch (error) {
-                    console.error(`Error processing batch at ${ix},${iz}:`, error);
-                    // Try to continue with next batch despite error
-                    if (onProgress) onProgress(1.0); // Signal completion to hide loader
+                    
+                    // Mark instance matrix as needing update only once
+                    this.instancedMesh.instanceMatrix.needsUpdate = true;
+                    console.timeEnd('Matrix updates');
+                    
+                    // Complete
+                    this.ready = true;
+                    if (onProgress) onProgress(1.0); // 100% complete
+                    console.log(`Grid creation complete. Created ${cubesCreated} cubes.`);
                 }
             };
             
-            // Start batch processing
-            processBatch(0, 0);
+            // Start quadtree insertion with a large batch size
+            insertQuadtreeBatch(0, 5000);
+            
         } catch (error) {
             console.error('Error in grid creation:', error);
             if (onProgress) onProgress(1.0); // Signal completion despite error
