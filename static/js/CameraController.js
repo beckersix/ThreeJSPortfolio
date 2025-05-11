@@ -7,7 +7,7 @@
 function CameraController(camera, target) {
     this.camera = camera;
     this.target = target; // The object to follow (e.g., cone)
-    this.offset = new THREE.Vector3(0, 5, 15); // Default camera offset
+    this.offset = new THREE.Vector3(0, 5, 25); // Default camera offset
     this.lookAhead = 0.01; // How far ahead to look
     this.smoothing = 0.05; // Camera movement smoothing factor
     this.currentPosition = new THREE.Vector3();
@@ -41,31 +41,47 @@ CameraController.prototype.update = function(splineLoader, progress) {
         }
 
         // Log position occasionally for debugging
-        if (Math.random() < 0.01) { // Only log 1% of the time to avoid console spam
+        if (Math.random() < 0.05) { // Only log 1% of the time to avoid console spam
             console.log(`Camera following path at progress: ${safeProgress.toFixed(3)}`, pathPosition);
         }
 
         // Use the configured camera offset from this.offset
         const desiredPosition = pathPosition.clone().add(this.offset);
         
-        // Use faster smoothing when far away to prevent lagging behind
+        // Use adaptive smoothing based on distance and vertical movement
         const distance = this.currentPosition.distanceTo(desiredPosition);
-        const adaptiveSmoothing = distance > 20 ? 0.2 : this.smoothing;
+        
+        // Calculate vertical distance separately for more gentle Y transitions
+        const verticalDistance = Math.abs(this.currentPosition.y - desiredPosition.y);
+        
+        // Use different smoothing factors for horizontal and vertical movement
+        // Horizontal movement can be faster, vertical should be more gradual
+        const horizontalSmoothing = distance > 20 ? 0.15 : 0.05;
+        
+        // Make vertical transitions extra smooth - lower values = smoother
+        // Use an extremely low smoothing factor for vertical movement to prevent abrupt changes
+        const verticalSmoothing = Math.min(0.008, 0.005 + (0.005 * (1 - Math.min(verticalDistance / 15, 1))));
         
         // Log offset occasionally for debugging
         if (Math.random() < 0.005) {
             console.log('Camera offset:', this.offset);
-            console.log('Desired camera position:', desiredPosition);
-            console.log('Current camera position:', this.currentPosition);
+            console.log('Vertical distance:', verticalDistance);
+            console.log('Vertical smoothing:', verticalSmoothing);
         }
         
-        this.currentPosition.lerp(desiredPosition, adaptiveSmoothing);
+        // Apply horizontal smoothing to X and Z
+        this.currentPosition.x += (desiredPosition.x - this.currentPosition.x) * horizontalSmoothing;
+        this.currentPosition.z += (desiredPosition.z - this.currentPosition.z) * horizontalSmoothing;
+        
+        // Apply extra-smooth vertical transition to Y
+        this.currentPosition.y += (desiredPosition.y - this.currentPosition.y) * verticalSmoothing;
+        
         this.camera.position.copy(this.currentPosition);
 
         // Always look at a point ahead of the character's position
         // Use the lookAhead property to control how far ahead to look
         const lookAtTarget = pathPosition.clone().add(new THREE.Vector3(0, 1, -this.offset.z * 0.1)); // Look ahead proportional to offset
-        this.currentLookAt.lerp(lookAtTarget, adaptiveSmoothing);
+        this.currentLookAt.lerp(lookAtTarget, horizontalSmoothing);
         this.camera.up.set(0, 1, 0); // Ensure Y is always up
         this.camera.lookAt(this.currentLookAt);
         this.camera.rotation.z = 0; // Prevent camera roll
