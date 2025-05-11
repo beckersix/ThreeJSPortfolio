@@ -12,16 +12,16 @@ class GridManager {
             // Grid dimensions
             gridSizeX: 100,     // Reduced from 350 for better performance
             gridSizeZ: 500,     // Reduced from 500 for better performance
-            spacing: 2.0,       // Increased from 1.6 to spread out cubes more
+            spacing: 4,       // Increased from 1.6 to spread out cubes more
             baseHeight: -18,
             gridX: 0,
             gridZ: -50,
             
             // Cube properties
-            cubeSize: 0.8,
+            cubeSize: 100,
             cubeColor: 0x00ffcc,
-            initialScale: 0.2,
-            maxScale: 2.0,  // Maximum scale for cubes
+            initialScale: .3,
+            maxScale: 4.0,  // Maximum scale for cubes
             
             // Effect parameters
             splineFalloff: 0.00000001,  // How quickly the spline effect falls off with distance
@@ -37,7 +37,7 @@ class GridManager {
             cullingDistance: 100,      // Distance beyond which cubes aren't processed
             updateInterval: 5,         // Only update every N frames
             maxCubesPerFrame: 1000,    // Maximum cubes to process per frame
-            lodFactor: 1.5,            // Level of detail factor (higher = more aggressive culling)
+            lodFactor: 2,            // Level of detail factor (higher = more aggressive culling)
             useSimpleMaterial: true    // Use simpler material for better performance
         }, options);
         
@@ -809,15 +809,7 @@ class GridManager {
             radius: 100,
             maxRaise: 25,
             maxScale: 1.5,
-            color: 0x00ffff,
-            emissive: 0x003333,
-            visualize: true,
-            visualizerType: 'sphere',
-            wireframe: true,
-            light: true,
-            lightColor: 0x00ffff,
-            lightIntensity: 1,
-            lightDistance: 30
+            wireframe: false
         }, options));
     }
     

@@ -274,11 +274,11 @@ SceneController.prototype.setupLighting = function() {
     this.scene.add(ambientLight);
     
     // Add directional light for shadows
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
     directionalLight.position.set(5, 10, 7);
     directionalLight.castShadow = true;
-    directionalLight.shadow.mapSize.width = 2048;
-    directionalLight.shadow.mapSize.height = 2048;
+    directionalLight.shadow.mapSize.width = 512;
+    directionalLight.shadow.mapSize.height = 512;
     directionalLight.shadow.camera.near = 1;
     directionalLight.shadow.camera.far = 50;
     this.scene.add(directionalLight);
@@ -295,7 +295,8 @@ SceneController.prototype.loadHDRIEnvironment = function() {
     const params = {
         metalness: 1.0,
         roughness: 0.0,
-        exposure: 1.5
+        exposure: 1,
+        emissive: 3
     };
     
     // Configure renderer for physically correct lighting
@@ -521,7 +522,7 @@ SceneController.prototype.createTestEffectors = function() {
                     maxScale: 1.5,           // REDUCED from 2.0 to 1.5
                     active: true,
                     color: 0x00ffff,
-                    visualize: true
+                    visualize: false
                 });
             }
         });
