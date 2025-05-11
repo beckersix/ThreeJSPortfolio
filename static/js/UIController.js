@@ -347,7 +347,7 @@ UIController.prototype.createPerformanceControls = function() {
     });
     
     // Max cubes per frame
-    this.createSlider(section, 'Max Cubes/Frame', 1000, 10000, this.gridManager.config.maxCubesPerFrame, 1000, function(value) {
+    this.createSlider(section, 'Max Cubes/Frame', 100, 10000, this.gridManager.config.maxCubesPerFrame, 1000, function(value) {
         self.gridManager.config.maxCubesPerFrame = value;
     });
     
