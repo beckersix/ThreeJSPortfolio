@@ -199,13 +199,15 @@ SceneController.prototype.initializeGridManager = function() {
     if (this.player) {
         console.log('Adding player as effector');
         this.gridManager.addEffector({
-            name: 'player',
-            object: this.player,
+            id: 'player',
+            name: 'Player',
             position: this.player.position,
-            radius: 100,  // Make sure property names match what GridManager expects
+            radius: 100,
             maxRaise: 15,
-            maxScale: 1.5,
-            active: true
+            maxScale: 2.0,
+            active: true,
+            color: 0xff0000,
+            visualize: false // We already have a player model
         });
     }
     
@@ -213,13 +215,16 @@ SceneController.prototype.initializeGridManager = function() {
     if (this.splineLoader && this.splineLoader.effectors) {
         this.splineLoader.effectors.forEach(effector => {
             this.gridManager.addEffector({
+                id: effector.name,
                 name: effector.name,
                 object: effector.object,
                 position: effector.position,
-                effectRadius: 100,
+                radius: 100,
                 maxRaise: 25,
-                falloffFactor: 0.0003,
-                color: 0x00ffff
+                maxScale: 2.0,
+                active: true,
+                color: 0x00ffff,
+                visualize: true
             });
         });
     }
@@ -242,76 +247,109 @@ SceneController.prototype.setupLighting = function() {
     this.scene.add(directionalLight);
 };
 
-// Create test effectors (visible objects that affect the grid)
+// Use ONLY the effectors from the OBJ model with their actual positions
 SceneController.prototype.createTestEffectors = function() {
-    console.log('Creating test effectors');
+    console.log('=== ADDING EFFECTORS TO GRID ===');
     
-    // Create 3 test effectors at different positions
-    const positions = [
-        { x: 50, y: 5, z: 50 },
-        { x: -50, y: 5, z: -50 },
-        { x: 0, y: 5, z: -100 }
-    ];
-    
-    // Store references to our test effectors
+    // Clear any existing test effectors
     this.testEffectors = [];
     
-    // Create each effector
-    positions.forEach((pos, index) => {
-        // Create a visible sphere with the "effector" name
-        const geometry = new THREE.SphereGeometry(5, 16, 16);
-        const material = new THREE.MeshStandardMaterial({
-            color: 0x00ffff,
-            emissive: 0x003333,
-            wireframe: true
-        });
+    // Check if we have effectors from the OBJ model via SplineLoader
+    if (this.splineLoader && this.splineLoader.effectors && this.splineLoader.effectors.length > 0) {
+        const effectorCount = this.splineLoader.effectors.length;
         
-        const effector = new THREE.Mesh(geometry, material);
-        effector.position.set(pos.x, pos.y, pos.z);
-        effector.name = 'effector.' + (index + 1); // Named as effector.1, effector.2, etc.
+        // Create a collection of effector positions for console output
+        const effectorPositions = this.splineLoader.effectors.map(e => ({
+            name: e.name,
+            x: parseFloat(e.position.x.toFixed(2)),
+            y: parseFloat(e.position.y.toFixed(2)),
+            z: parseFloat(e.position.z.toFixed(2))
+        }));
         
-        // Add a point light
-        const light = new THREE.PointLight(0x00ffff, 1, 30);
-        light.position.set(0, 0, 0);
-        effector.add(light);
+        // Output effector positions as a table
+        console.log(`Adding ${effectorCount} effectors to grid:`);
+        console.table(effectorPositions);
         
-        // Add to scene
-        this.scene.add(effector);
-        
-        // Store reference
-        this.testEffectors.push(effector);
-        
-        console.log(`Created test effector ${effector.name} at position:`, pos);
-    });
-    
-    // If the SplineLoader exists, manually add these to its effectors array
-    if (this.splineLoader) {
-        positions.forEach((pos, index) => {
-            const effector = this.testEffectors[index];
-            this.splineLoader.effectors.push({
-                name: effector.name,
-                position: effector.position,
-                object: effector
+        // Process each effector from the OBJ model
+        this.splineLoader.effectors.forEach(effector => {
+            // Skip if position is invalid
+            if (!effector.position) {
+                console.error(`Effector ${effector.name} has no position`);
+                return;
+            }
+            
+            // Create a visual representation for the effector
+            const geometry = new THREE.SphereGeometry(5, 16, 16);
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x00ffff,
+                emissive: 0x003333,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.7
             });
+            
+            // Create the effector mesh at the EXACT position from the OBJ
+            const effectorMesh = new THREE.Mesh(geometry, material);
+            
+            // Ensure the position is valid
+            if (!effector.position || isNaN(effector.position.x) || isNaN(effector.position.y) || isNaN(effector.position.z)) {
+                console.error(`Invalid position for effector ${effector.name}:`, effector.position);
+                // Create a fallback position
+                effector.position = new THREE.Vector3(
+                    Math.random() * 200 - 100,  // Random X between -100 and 100
+                    10,                         // Fixed Y at 10
+                    Math.random() * -500        // Random Z between 0 and -500
+                );
+                console.log(`Created fallback position: (${effector.position.x.toFixed(2)}, ${effector.position.y.toFixed(2)}, ${effector.position.z.toFixed(2)})`);
+            }
+            
+            // Log the position before setting it
+            console.log(`USING EFFECTOR POSITION: ${effector.name} at (${effector.position.x.toFixed(2)}, ${effector.position.y.toFixed(2)}, ${effector.position.z.toFixed(2)})`);
+            
+            // Set the position
+            effectorMesh.position.copy(effector.position);
+            effectorMesh.name = effector.name;
+            
+            // Log the position after setting it
+            console.log(`MESH POSITION SET: ${effectorMesh.name} at (${effectorMesh.position.x.toFixed(2)}, ${effectorMesh.position.y.toFixed(2)}, ${effectorMesh.position.z.toFixed(2)})`);
+            
+            // Add a point light
+            const light = new THREE.PointLight(0x00ffff, 1, 50);
+            light.position.set(0, 0, 0);
+            effectorMesh.add(light);
+            
+            // Add to scene
+            this.scene.add(effectorMesh);
+            
+            // Store reference
+            this.testEffectors.push(effectorMesh);
+            
+            // Add to GridManager
+            if (this.gridManager) {
+                // Log the position being sent to GridManager
+                const clonedPosition = effector.position.clone();
+                console.log(`ADDING TO GRID: ${effector.name} at (${clonedPosition.x.toFixed(2)}, ${clonedPosition.y.toFixed(2)}, ${clonedPosition.z.toFixed(2)})`);
+                
+                // Add the effector to GridManager with its position
+                this.gridManager.addEffector({
+                    id: effector.name,
+                    name: effector.name,
+                    position: clonedPosition, // Clone to avoid reference issues
+                    radius: 50,              // REDUCED from 100 to 50
+                    maxRaise: 15,            // REDUCED from 25 to 15
+                    maxScale: 1.5,           // REDUCED from 2.0 to 1.5
+                    active: true,
+                    color: 0x00ffff,
+                    visualize: true
+                });
+                
+                console.log(`EFFECTOR ADDED TO GRID: ${effector.name}`);
+            }
         });
-        console.log('Added test effectors to SplineLoader.effectors array');
+        
+        console.log(`=== EFFECTORS ADDED SUCCESSFULLY ===`);
     } else {
-        console.log('SplineLoader not available yet, effectors will be found during scene traversal');
-    }
-    
-    // If GridManager is already initialized, add these effectors to it
-    if (this.gridManager) {
-        this.testEffectors.forEach(effector => {
-            this.gridManager.addEffector({
-                name: effector.name,
-                object: effector,
-                position: effector.position,
-                effectRadius: 100,
-                maxRaise: 25,
-                falloffFactor: 0.0003,
-                color: 0x00ffff
-            });
-        });
+        console.log('No effectors found in OBJ model');
     }
 };
 

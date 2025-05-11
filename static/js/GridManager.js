@@ -227,20 +227,83 @@ class GridManager {
     
     // Add an effector (source of influence on the grid)
     addEffector(effector) {
+        console.log('=== GRID MANAGER: ADDING EFFECTOR ===');
+        console.log('Received effector:', effector.name || 'unnamed');
+        
         // Validate effector
-        if (!effector || !effector.position) {
-            console.error('Invalid effector:', effector);
+        if (!effector) {
+            console.error('Invalid effector (null or undefined)');
             return false;
         }
+        
+        // Check for position
+        if (!effector.position) {
+            console.error('Effector missing position:', effector);
+            return false;
+        }
+        
+        // Log the incoming position
+        console.log(`INCOMING POSITION: ${JSON.stringify({
+            x: effector.position.x,
+            y: effector.position.y,
+            z: effector.position.z
+        })}`);
+        
+        // Ensure position is a Vector3
+        if (!(effector.position instanceof THREE.Vector3)) {
+            console.log('Position is not a Vector3, attempting to convert...');
+            // Try to convert to Vector3 if it has x, y, z properties
+            if (effector.position.x !== undefined && 
+                effector.position.y !== undefined && 
+                effector.position.z !== undefined) {
+                const oldPos = {
+                    x: effector.position.x,
+                    y: effector.position.y,
+                    z: effector.position.z
+                };
+                
+                effector.position = new THREE.Vector3(
+                    effector.position.x,
+                    effector.position.y,
+                    effector.position.z
+                );
+                
+                console.log(`Converted position from (${oldPos.x}, ${oldPos.y}, ${oldPos.z}) to Vector3`);
+            } else {
+                console.error('Effector position is not a Vector3 and cannot be converted:', effector.position);
+                return false;
+            }
+        }
+        
+        // Ensure required properties
+        if (!effector.id) {
+            effector.id = `effector_${this.effectors.length}`;
+            console.log(`Assigned ID: ${effector.id}`);
+        }
+        
+        if (effector.active === undefined) {
+            effector.active = true;
+        }
+        
+        if (!effector.radius) {
+            effector.radius = 100; // Default radius
+            console.log(`Using default radius: ${effector.radius}`);
+        }
+        
+        // Log the final position before adding to collection
+        console.log(`FINAL POSITION: (${effector.position.x.toFixed(2)}, ${effector.position.y.toFixed(2)}, ${effector.position.z.toFixed(2)})`);
         
         // Add to collection
         this.effectors.push(effector);
         
         // Create visualizer if requested
         if (effector.visualize) {
+            console.log('Creating visualizer for effector');
             this.createEffectorVisualizer(effector);
         }
         
+        console.log(`EFFECTOR ADDED SUCCESSFULLY: ${effector.name || effector.id} at position (${effector.position.x.toFixed(2)}, ${effector.position.y.toFixed(2)}, ${effector.position.z.toFixed(2)})`);
+        console.log('=== END ADDING EFFECTOR ===');
         return true;
     }
     
@@ -270,60 +333,132 @@ class GridManager {
             return; // Already exists or no ID
         }
         
-        // Create mesh based on effector type
-        let mesh;
+        // Create a group to hold the visualizer components
+        const group = new THREE.Group();
+        
+        // Create primary mesh based on effector type
+        let primaryMesh;
         
         if (effector.visualizerType === 'sphere') {
             const geometry = new THREE.SphereGeometry(5, 16, 16);
             const material = new THREE.MeshStandardMaterial({
                 color: effector.color || 0x00ffff,
                 emissive: effector.emissive || 0x003333,
-                wireframe: effector.wireframe !== undefined ? effector.wireframe : true
+                wireframe: effector.wireframe !== undefined ? effector.wireframe : false,
+                transparent: true,
+                opacity: 0.7,
+                metalness: 0.8,
+                roughness: 0.2
             });
             
-            mesh = new THREE.Mesh(geometry, material);
+            primaryMesh = new THREE.Mesh(geometry, material);
+            
+            // Add outer wireframe for better visibility
+            const wireGeometry = new THREE.SphereGeometry(5.2, 16, 16);
+            const wireMaterial = new THREE.MeshBasicMaterial({
+                color: effector.color || 0x00ffff,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.5
+            });
+            const wireMesh = new THREE.Mesh(wireGeometry, wireMaterial);
+            group.add(wireMesh);
+            
         } else if (effector.visualizerType === 'cone') {
             const geometry = new THREE.ConeGeometry(3, 6, 24);
             const material = new THREE.MeshStandardMaterial({
                 color: effector.color || 0xff0000,
                 emissive: effector.emissive || 0x330000,
-                wireframe: effector.wireframe !== undefined ? effector.wireframe : false
+                wireframe: effector.wireframe !== undefined ? effector.wireframe : false,
+                transparent: true,
+                opacity: 0.8,
+                metalness: 0.7,
+                roughness: 0.3
             });
             
-            mesh = new THREE.Mesh(geometry, material);
-            mesh.rotation.x = Math.PI; // Point downward
+            primaryMesh = new THREE.Mesh(geometry, material);
+            primaryMesh.rotation.x = Math.PI; // Point downward
+            
+            // Add outer wireframe
+            const wireGeometry = new THREE.ConeGeometry(3.2, 6.2, 24);
+            const wireMaterial = new THREE.MeshBasicMaterial({
+                color: effector.color || 0xff0000,
+                wireframe: true,
+                transparent: true,
+                opacity: 0.5
+            });
+            const wireMesh = new THREE.Mesh(wireGeometry, wireMaterial);
+            wireMesh.rotation.x = Math.PI; // Point downward
+            group.add(wireMesh);
+            
         } else {
-            // Default box
-            const geometry = new THREE.BoxGeometry(4, 4, 4);
-            const material = new THREE.MeshBasicMaterial({
+            // Default is a glowing orb
+            const geometry = new THREE.SphereGeometry(4, 16, 16);
+            const material = new THREE.MeshStandardMaterial({
                 color: effector.color || 0xffff00,
+                emissive: effector.color || 0xffff00,
+                emissiveIntensity: 0.5,
+                transparent: true,
+                opacity: 0.7
+            });
+            
+            primaryMesh = new THREE.Mesh(geometry, material);
+            
+            // Add pulsing ring
+            const ringGeometry = new THREE.TorusGeometry(6, 0.5, 16, 32);
+            const ringMaterial = new THREE.MeshBasicMaterial({
+                color: effector.color || 0xffff00,
+                transparent: true,
+                opacity: 0.5,
                 wireframe: true
             });
+            const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+            ring.rotation.x = Math.PI / 2; // Make it horizontal
+            group.add(ring);
             
-            mesh = new THREE.Mesh(geometry, material);
+            // Add animation to the ring
+            const animate = () => {
+                if (this.visualizers[effector.id]) {
+                    ring.rotation.z += 0.01;
+                    requestAnimationFrame(animate);
+                }
+            };
+            animate();
         }
         
-        // Add light if requested
-        if (effector.light) {
-            const light = new THREE.PointLight(
-                effector.lightColor || effector.color || 0xffffff,
-                effector.lightIntensity || 1,
-                effector.lightDistance || 30
-            );
-            light.position.set(0, 0, 0);
-            mesh.add(light);
-        }
+        // Add primary mesh to the group
+        group.add(primaryMesh);
         
-        // Position the visualizer
-        mesh.position.copy(effector.position);
+        // Add a point light
+        const light = new THREE.PointLight(
+            effector.lightColor || effector.color || 0xffffff,
+            effector.lightIntensity || 0.8,
+            effector.lightDistance || 50
+        );
+        light.position.set(0, 0, 0);
+        group.add(light);
+        
+        // Add radius indicator (subtle circle on the ground)
+        const radiusGeometry = new THREE.RingGeometry(effector.radius - 0.5, effector.radius, 32);
+        const radiusMaterial = new THREE.MeshBasicMaterial({
+            color: effector.color || 0xffffff,
+            transparent: true,
+            opacity: 0.2,
+            side: THREE.DoubleSide
+        });
+        const radiusRing = new THREE.Mesh(radiusGeometry, radiusMaterial);
+        radiusRing.rotation.x = Math.PI / 2; // Lay flat on the ground
+        radiusRing.position.y = -5; // Slightly above the ground
+        group.add(radiusRing);
+        
+        // Position the visualizer group
+        group.position.copy(effector.position);
         
         // Store and add to scene
-        this.visualizers[effector.id] = mesh;
-        this.scene.add(mesh);
+        this.visualizers[effector.id] = group;
+        this.scene.add(group);
         
-        console.log(`Created visualizer for effector ${effector.id}`, mesh.position);
-        
-        return mesh;
+        return group;
     }
     
     // Update effector position
@@ -376,16 +511,45 @@ class GridManager {
         const cubesToProcess = new Set();
         const dummy = new THREE.Object3D();
         
+        // Ensure all effectors have visualizers and are positioned correctly
+        this.effectors.forEach(effector => {
+            if (effector.visualize !== false) {
+                // Create visualizer if it doesn't exist
+                if (!this.visualizers[effector.id]) {
+                    this.createEffectorVisualizer(effector);
+                }
+                
+                // Update visualizer position to match effector
+                if (this.visualizers[effector.id] && effector.position) {
+                    this.visualizers[effector.id].position.copy(effector.position);
+                }
+            }
+        });
+        
         // First add cubes near each effector
         for (const effector of this.effectors) {
             if (!effector.active) continue;
+            
+            // Make sure position is valid
+            if (!effector.position || isNaN(effector.position.x) || isNaN(effector.position.z)) {
+                console.error('Invalid effector position:', effector);
+                continue;
+            }
+            
+            // Use a larger radius to ensure we catch all affected cubes
+            const queryRadius = (effector.radius || 100) * 1.2;
             
             // Query cubes around this effector
             const nearbyCubes = this.quadTree.query({
                 x: effector.position.x,
                 z: effector.position.z,
-                radius: effector.radius || 100
+                radius: queryRadius
             });
+            
+            // Update visualizer position if it exists
+            if (this.visualizers[effector.id]) {
+                this.visualizers[effector.id].position.copy(effector.position);
+            }
             
             // Add to processing set (auto-deduplicates)
             nearbyCubes.forEach(cube => cubesToProcess.add(cube.key));
@@ -418,21 +582,25 @@ class GridManager {
                 if (dist > (effector.radius || 100)) continue;
                 
                 // Calculate falloff factor (0-1, higher closer to effector)
+                // Using a more gentle falloff curve
                 const distRatio = dist / (effector.radius || 100);
-                const falloff = Math.max(0, 1 - (distRatio * distRatio));
+                // Using a cubic falloff for more gradual transition
+                const falloff = Math.max(0, 1 - (distRatio * distRatio * distRatio));
                 
                 // Skip if negligible effect
                 if (falloff < 0.005) continue;
                 
-                // Calculate height effect with cubic easing
-                const cubicEasing = falloff * falloff * falloff;
-                const raise = (effector.maxRaise || this.config.effectorHeight) * cubicEasing;
+                // Calculate height effect with a gentler easing function
+                // Using a quintic easing (power of 5) for an even more gradual effect
+                const gentleEasing = falloff * falloff * falloff * falloff * falloff;
+                const raise = (effector.maxRaise || this.config.effectorHeight) * gentleEasing;
                 
                 // Calculate scale effect (closer = larger)
                 let scaleFactor = this.config.initialScale;
                 if (dist < (effector.radius || 100)) {
                     const t = 1 - distRatio;
-                    const smoothT = t * t * t; // Cubic easing
+                    // Use a gentler easing for scale as well (quintic instead of cubic)
+                    const smoothT = t * t * t * t * t; 
                     const maxEffectorScale = effector.maxScale || this.config.maxScale;
                     scaleFactor = this.config.initialScale + 
                                   smoothT * (maxEffectorScale - this.config.initialScale);

@@ -10,6 +10,7 @@ function SplineLoader(scene) {
     this.cameraPath = null;
     this.pathPoints = [];
     this.effectors = []; // Initialize the effectors array
+    this.roadObject = null; // Store the road object for collision detection
 }
 
 // Returns a point on the camera path at parameter t (0 to 1)
@@ -82,9 +83,23 @@ SplineLoader.prototype.loadOBJModel = function(url, callback) {
         // Now add to scene
         self.scene.add(object);
         
+        // Force update of all world matrices to ensure correct world positions
+        object.updateMatrixWorld(true);
+        
+        console.log('=== UPDATING WORLD MATRICES FOR ALL OBJECTS ===');
+        
         // Log all object names and types in the OBJ hierarchy
         function logNames(obj, depth = 0) {
             console.log(' '.repeat(depth * 2) + obj.name + ' (' + obj.type + ')');
+            
+            // Log position information for debugging
+            if (obj.type === 'Mesh' || obj.type === 'Object3D') {
+                const worldPos = new THREE.Vector3();
+                worldPos.setFromMatrixPosition(obj.matrixWorld);
+                console.log(' '.repeat(depth * 2) + '  World Position:', 
+                           worldPos.x.toFixed(2), worldPos.y.toFixed(2), worldPos.z.toFixed(2));
+            }
+            
             if (obj.children) obj.children.forEach(child => logNames(child, depth + 1));
         }
         SplineLoader.prototype.logNames = logNames;
@@ -95,6 +110,9 @@ SplineLoader.prototype.loadOBJModel = function(url, callback) {
             self.effectors = [];
         }
         self.findEffectors(object);
+        
+        // Find the road object for collision detection
+        self.findRoadObject(object);
             
         // Find 'camera_path' and extract points
         const cameraPathObj = self._findObjectByName(object, 'camera_path');
@@ -160,20 +178,74 @@ SplineLoader.prototype._extractPoints = function(obj) {
     return points;
 };
 
+// Find the road object in the loaded model for collision detection
+SplineLoader.prototype.findRoadObject = function(object) {
+    // Check if this object is the road based on name
+    if (object.name && (
+        object.name.toLowerCase().includes('road') ||
+        object.name.toLowerCase().includes('path') ||
+        object.name.toLowerCase().includes('track') ||
+        object.name.toLowerCase().includes('street')
+    )) {
+        console.log(`Found road object: ${object.name}`);
+        
+        // Store the road object for collision detection
+        this.roadObject = object;
+        
+        // If it has geometry, log details
+        if (object.geometry) {
+            console.log(`Road geometry: vertices=${object.geometry.attributes?.position?.count || 'unknown'}`);
+            
+            // Create a bounding box for the road
+            if (!object.geometry.boundingBox) {
+                object.geometry.computeBoundingBox();
+            }
+            
+            // Log the bounding box
+            const box = object.geometry.boundingBox;
+            if (box) {
+                console.log(`Road bounding box: min=(${box.min.x.toFixed(2)}, ${box.min.y.toFixed(2)}, ${box.min.z.toFixed(2)}), ` +
+                            `max=(${box.max.x.toFixed(2)}, ${box.max.y.toFixed(2)}, ${box.max.z.toFixed(2)})`);
+            }
+        }
+        
+        return true;
+    }
+    
+    // Recursively check children
+    if (object.children && object.children.length > 0) {
+        for (let i = 0; i < object.children.length; i++) {
+            if (this.findRoadObject(object.children[i])) {
+                return true;
+            }
+        }
+    }
+    
+    return false;
+};
+
 // Find all objects named 'effector' or 'effector.XXX' in the loaded model
 SplineLoader.prototype.findEffectors = function(object) {
     // We only want to clear once at the beginning of the model loading process
     // This static flag ensures we're not clearing the array during recursive calls
     if (!SplineLoader._effectorSearchInitialized) {
-        console.log('Starting new effector search, clearing previous effectors');
+        console.log('=== EFFECTOR DETECTION STARTED ===');
         this.effectors = [];
         SplineLoader._effectorSearchInitialized = true;
         
         // Reset this flag when loading is completed (after a delay)
         setTimeout(() => {
             SplineLoader._effectorSearchInitialized = false;
-            console.log('Effector search completed, found', this.effectors.length, 'effectors');
-            this.effectors.forEach(e => console.log(' -', e.name));
+            console.log('=== EFFECTOR DETECTION COMPLETED ===');
+            console.log(`Found ${this.effectors.length} effectors in OBJ model:`);
+            
+            // Create a table for better visualization of effector positions
+            console.table(this.effectors.map(e => ({
+                name: e.name,
+                x: parseFloat(e.position.x.toFixed(2)),
+                y: parseFloat(e.position.y.toFixed(2)),
+                z: parseFloat(e.position.z.toFixed(2))
+            })));
         }, 1000);
     }
     
@@ -186,37 +258,53 @@ SplineLoader.prototype.findEffectors = function(object) {
         object.name.toLowerCase().includes('effect') ||
         object.name.toLowerCase().includes('emitter')
     )) {
-        // Convert to world coordinates if needed
-        object.updateMatrixWorld(true);
-        const worldPosition = new THREE.Vector3();
-        worldPosition.setFromMatrixPosition(object.matrixWorld);
+        // Calculate the center position of the geometry (average of all vertices)
+        let position;
         
-        console.log('Found effector:', object.name);
-        console.log('  Local position:', object.position.x, object.position.y, object.position.z);
-        console.log('  World position:', worldPosition.x, worldPosition.y, worldPosition.z);
+        if (object.geometry && object.geometry.attributes && object.geometry.attributes.position) {
+            // Get position attribute from geometry
+            const positionAttr = object.geometry.attributes.position;
+            const vertexCount = positionAttr.count;
+            
+            if (vertexCount > 0) {
+                // Calculate the center by averaging all vertices
+                const center = new THREE.Vector3();
+                const tempVertex = new THREE.Vector3();
+                
+                // Sum all vertex positions
+                for (let i = 0; i < vertexCount; i++) {
+                    tempVertex.fromBufferAttribute(positionAttr, i);
+                    center.add(tempVertex);
+                }
+                
+                // Divide by vertex count to get average
+                center.divideScalar(vertexCount);
+                
+                // Apply object's world matrix to get world position
+                object.updateMatrixWorld(true);
+                position = center.clone().applyMatrix4(object.matrixWorld);
+                
+                console.log(`USING GEOMETRY CENTER: ${object.name} (avg of ${vertexCount} vertices) at position (${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)})`);
+            } else {
+                console.log(`No vertices found in ${object.name}, using world position`);
+                position = new THREE.Vector3();
+                object.updateMatrixWorld(true);
+                position.setFromMatrixPosition(object.matrixWorld);
+            }
+        } else {
+            // Fallback to world position if no geometry
+            position = new THREE.Vector3();
+            object.updateMatrixWorld(true);
+            position.setFromMatrixPosition(object.matrixWorld);
+            console.log(`No geometry found for ${object.name}, using world position (${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)})`);
+        }
         
+        // Store the effector with its position
         this.effectors.push({
             name: object.name,
-            position: worldPosition, // Use world position instead of local
+            position: position,
             object: object
         });
-        
-        // Make the effector visible with a distinct material
-        if (object.type === 'Mesh') {
-            // Create a glowing material for the effector
-            const effectorMaterial = new THREE.MeshStandardMaterial({
-                color: 0x00ffff,
-                emissive: 0x00aaaa,
-                metalness: 0.9,
-                roughness: 0.1
-            });
-            object.material = effectorMaterial;
-            
-            // Add a point light
-            const effectorLight = new THREE.PointLight(0x00ffff, 1, 20);
-            effectorLight.position.set(0, 1, 0);
-            object.add(effectorLight);
-        }
     }
     
     // Recursively check all children

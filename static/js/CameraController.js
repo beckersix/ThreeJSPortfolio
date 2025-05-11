@@ -40,10 +40,13 @@ CameraController.prototype.update = function(splineLoader, progress) {
             return;
         }
 
-        // Log position occasionally for debugging
-        if (Math.random() < 0.05) { // Only log 1% of the time to avoid console spam
+        // Debug logs disabled to reduce console spam
+        // Uncomment if needed for debugging
+        /*
+        if (Math.random() < 0.01) { // Only log 1% of the time to avoid console spam
             console.log(`Camera following path at progress: ${safeProgress.toFixed(3)}`, pathPosition);
         }
+        */
 
         // Use the configured camera offset from this.offset
         const desiredPosition = pathPosition.clone().add(this.offset);
@@ -62,12 +65,14 @@ CameraController.prototype.update = function(splineLoader, progress) {
         // Use an extremely low smoothing factor for vertical movement to prevent abrupt changes
         const verticalSmoothing = Math.min(0.008, 0.005 + (0.005 * (1 - Math.min(verticalDistance / 15, 1))));
         
-        // Log offset occasionally for debugging
-        if (Math.random() < 0.005) {
+        // Debug logs disabled to reduce console spam
+        /*
+        if (Math.random() < 0.001) {
             console.log('Camera offset:', this.offset);
             console.log('Vertical distance:', verticalDistance);
             console.log('Vertical smoothing:', verticalSmoothing);
         }
+        */
         
         // Apply horizontal smoothing to X and Z
         this.currentPosition.x += (desiredPosition.x - this.currentPosition.x) * horizontalSmoothing;
