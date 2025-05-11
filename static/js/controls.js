@@ -147,7 +147,7 @@ function setupControls(sceneControllerInstance) {
         performance: {
             cullingDistance: gridManager && gridManager.config ? (gridManager.config.cullingDistance || 100) : 100,
             maxCubesPerFrame: gridManager && gridManager.config ? (gridManager.config.maxCubesPerFrame || 1000) : 1000,
-            updateInterval: gridManager && gridManager.config ? (gridManager.config.updateInterval || 5) : 5,
+            updateInterval: gridManager && gridManager.config ? (gridManager.config.updateInterval || 25) : 25,
             maxUpdateDistance: gridManager && gridManager.config ? (gridManager.config.maxUpdateDistance || 120) : 120
         }
     };
