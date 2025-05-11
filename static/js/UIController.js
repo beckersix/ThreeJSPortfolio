@@ -352,7 +352,7 @@ UIController.prototype.createPerformanceControls = function() {
     });
     
     // Update interval
-    this.createSlider(section, 'Update Interval', 1, 5, this.gridManager.config.updateInterval, 1, function(value) {
+    this.createSlider(section, 'Update Interval', 1, 25, this.gridManager.config.updateInterval, 1, function(value) {
         self.gridManager.config.updateInterval = Math.round(value);
     });
     
