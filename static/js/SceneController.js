@@ -137,6 +137,12 @@ function SceneController() {
     this.initialized = false;
     this.sceneFilePath = '/static/models/Scene.obj';
     
+    // Wave animation properties - independent of camera movement
+    this.waveTime = 0;
+    this.waveSpeed = 0.2; // Slower for smoother animation
+    this.waveAmplitude = 1.5; // Subtler amplitude
+    this.waveFrequency = 0.01; // Lower frequency for wider, smoother waves
+    
     // Preloader elements
     this.preloader = {
         overlay: document.getElementById('preloader'),
@@ -159,7 +165,7 @@ SceneController.prototype.init = function() {
     
     // Add atmospheric fog for depth and mood
     const fogColor = new THREE.Color(0x89a7c2);  // Soft blue-gray color
-    this.scene.fog = new THREE.FogExp2(fogColor, 0.0035);  // Exponential fog with moderate density
+    this.scene.fog = new THREE.FogExp2(fogColor, 0.0045);  // Exponential fog with moderate density
     
     // Create a gradient background
     const topColor = new THREE.Color(0x1c3a5e);  // Deep blue
@@ -211,11 +217,10 @@ SceneController.prototype.init = function() {
     // Initialize SplineLoader for loading OBJ models with camera paths
     this.splineLoader = new SplineLoader(this.scene);
     
-    // First create a simple sine wave spline as a fallback
-    this.createSineWaveSpline();
-    console.log('Fallback spline initialized:', this.spline);
+    // Skip the fallback spline and only use the OBJ path
+    // this.createSineWaveSpline();
     
-    // Then try to load the OBJ model with camera path
+    // Load the OBJ model with camera path
     // This will happen asynchronously
     this.updatePreloader(22, 'Loading 3D models...');
     
@@ -224,15 +229,21 @@ SceneController.prototype.init = function() {
     
     this.splineLoader.loadOBJModel(objPath, (loader, error) => {
         if (error) {
-            console.warn('Failed to load OBJ model:', error);
-            console.log('Using fallback sine wave spline instead');
+            console.error('Failed to load OBJ model:', error);
         } else {
             console.log('OBJ model loaded successfully');
-            // If the model has a camera path, use it instead of the sine wave
+            // If the model has a camera path, use it
             if (loader && loader.cameraPath) {
                 console.log('Using camera path from OBJ model');
                 // Keep a reference to the loaded camera path
                 this.objCameraPath = loader.cameraPath;
+                
+                // Log path details for debugging
+                console.log('Camera path points:', loader.cameraPath.points ? loader.cameraPath.points.length : 'none');
+                console.log('First point:', loader.cameraPath.points ? loader.cameraPath.points[0] : 'none');
+                console.log('Last point:', loader.cameraPath.points ? loader.cameraPath.points[loader.cameraPath.points.length-1] : 'none');
+            } else {
+                console.error('No camera path found in OBJ model');
             }
         }
     });
@@ -300,18 +311,18 @@ SceneController.prototype.createCubes = function() {
     this.cubes = [];
     this.cubeGridPositions = {};
 
-    // Grid configuration
-    const gridSizeZ = 500; // Reduced from 700 for faster loading
-    const gridSizeX = 500; // Reduced from 400 for faster loading
+    // Grid configuration - SIGNIFICANTLY reduced for better performance
+    const gridSizeZ = 550; // Reduced from 500 for much faster loading
+    const gridSizeX = 250; // Reduced from 500 for much faster loading
     const spacing = 1.6;
     const halfX = (gridSizeX - 1) * spacing / 2;
     const halfZ = (gridSizeZ - 1) * spacing / 2;
     const size = 1.5;
     const color = 0x00ffcc;
-    const gridY = -35; // Base grid height
+    const gridY = -25; // Base grid height
     const gridZ = -50;
     const gridX = 0;
-    const InitialFalloff = 0.00001;
+    const InitialFalloff = 0.0001;
     
     console.log(`Creating grid ${gridSizeX}x${gridSizeZ} (${gridSizeX * gridSizeZ} total cubes)`);
     
@@ -338,9 +349,8 @@ SceneController.prototype.createCubes = function() {
     this.cubeInstancedMesh.castShadow = true;
     this.cubeInstancedMesh.receiveShadow = true;
     
-    // Initialize with the spline if available
-    const spline = this.spline;
-    console.log('Using spline:', spline);
+    // We're using the OBJ camera path instead of a local spline
+    console.log('Using OBJ camera path for terrain:', this.objCameraPath ? 'available' : 'not yet loaded');
     
     // For tracking progress
     let cubesCreated = 0;
@@ -348,112 +358,151 @@ SceneController.prototype.createCubes = function() {
     
     // Use batch processing with timeouts to allow UI updates
     const processBatch = (ix, iz) => {
-        // Process a small batch of cubes - smaller batches for more frequent updates
-        const batchSize = Math.min(gridSizeZ - iz, 20); 
+        // Process a much larger batch of cubes for better performance
+        const batchSize = Math.min(gridSizeZ - iz, 300); // Increased to 250 for faster loading
+        const dummy = new THREE.Object3D(); // Reuse a single dummy object for all matrix calculations
         
-        for (let i = 0; i < batchSize; i++) {
+        // Precompute spline points for faster lookup - using more samples for smoother effect
+        const splinePoints = [];
+        const splineSteps = 50; // Increased for smoother spline sampling
+        
+        // Use the OBJ camera path for terrain height adjustment
+        if (this.objCameraPath) {
+            for (let t = 0; t <= splineSteps; t++) {
+                const tt = t / splineSteps;
+                splinePoints.push(this.objCameraPath.getPoint(tt));
+            }
+            
+            // Log spline points for debugging
+            if (ix === 0 && iz === 0) {
+                console.log(`Precomputed ${splinePoints.length} spline points for terrain`);
+            }
+        }
+        
+        // Calculate actual batch size based on remaining cubes in this row
+        const actualBatchSize = Math.min(batchSize, gridSizeZ - iz);
+        const batchStartIndex = cubesCreated; // Remember starting index for this batch
+        
+        for (let i = 0; i < actualBatchSize; i++) {
             const currentIz = iz + i;
-            if (currentIz >= gridSizeZ) break; // Safety check
             
             const px = ix * spacing - halfX + gridX;
             const pz = currentIz * spacing - halfZ + gridZ;
             
             // Regular cube creation code
             let baseY = gridY;
-            if (spline) {
-                // Find closest point on spline in XZ 
+            
+            if (this.objCameraPath) {
+                // Use precomputed points for faster lookup
                 let closestT = 0;
                 let minDist = Infinity;
-                const steps = 100; // Reduced for faster processing
                 
-                // First coarse search
-                for (let t = 0; t <= steps; t++) {
-                    const tt = t / steps;
-                    const pt = spline.getPoint(tt);
-                    const dXZ = Math.sqrt((pt.x - px) * (pt.x - px) + (pt.z - pz) * (pt.z - pz));
-                    if (dXZ < minDist) {
-                        minDist = dXZ;
-                        closestT = tt;
+                // Faster distance calculation using squared distance (avoid sqrt)
+                for (let t = 0; t < splinePoints.length; t++) {
+                    const pt = splinePoints[t];
+                    const dx = pt.x - px;
+                    const dz = pt.z - pz;
+                    const distSq = dx*dx + dz*dz; // Squared distance is faster than sqrt
+                    
+                    if (distSq < minDist) {
+                        minDist = distSq;
+                        closestT = t / splineSteps;
                     }
                 }
                 
-                const pathPt = spline.getPoint(closestT);
+                const pathPt = this.objCameraPath.getPoint(closestT);
                 
-                // Simple falloff function
-                const falloffDist = Math.max(minDist, 0.001); // Prevent division by zero
-                const falloff = Math.exp(-0.005 * falloffDist * falloffDist);
+                // Calculate distance-based height that comes up closer to the spline
+                // Use a base height that's closer to the spline height
+                const splineHeight = pathPt.y;
+                const baseHeight = splineHeight - 5; // Start just 5 units below the spline
                 
-                // Apply falloff to height with smooth transition
-                baseY = gridY + (pathPt.y - gridY) * falloff * 0.7;
+                // Use an extremely gentle falloff that extends very far in X and Z
+                const falloff = 1 / (1 + 0.00001 * minDist * minDist); // Very gentle falloff
+                
+                // Apply smoothstep for even smoother transitions at the edges
+                const smoothFalloff = falloff * falloff * (3 - 2 * falloff);
+                
+                // Calculate height as a blend between grid base and spline-relative height
+                // This makes terrain come up closer to the spline but still follow its contour
+                const maxRaise = 15; // Maximum height raise
+                const raise = smoothFalloff * maxRaise;
+                
+                // Apply the height effect - blend between grid base and spline-relative height
+                baseY = gridY + raise;
+                
+                // Ensure we don't exceed the spline height
+                baseY = Math.min(baseY, splineHeight - 1);
             }
             
             const key = `${ix}_${currentIz}`;
-            const cube = { x: px, z: pz, baseY, i: cubesCreated, key };
+            const currentIndex = batchStartIndex + i; // Calculate exact index for this cube
+            const cube = { x: px, z: pz, baseY, i: currentIndex, key };
             this.cubeGridPositions[key] = cube;
             
             // Insert into quadtree for spatial queries
             this.quadTree.insert(cube);
             
-            // Set initial matrix
-            const matrix = new THREE.Matrix4().makeTranslation(px, baseY, pz);
-            this.cubeInstancedMesh.setMatrixAt(cubesCreated, matrix);
-            cubesCreated++;
-            
-            // Update progress with each batch
-            // Scale to 30-90% range (60% of total loading allocated to cube creation)
-            const progress = Math.floor((cubesCreated / totalCubes) * 60);
-            if (progress > lastProgressUpdate) {
-                lastProgressUpdate = progress;
-                // Make preloader immediately visible with cube updates
-                this.updatePreloader(30 + progress, `Creating grid: ${cubesCreated.toLocaleString()} / ${totalCubes.toLocaleString()} cubes`);
-                console.log(`Progress: ${progress}% - Created ${cubesCreated} cubes`);
-            }
+            // Set initial matrix - using the dummy object for better performance
+            dummy.position.set(px, baseY, pz);
+            dummy.updateMatrix();
+            this.cubeInstancedMesh.setMatrixAt(currentIndex, dummy.matrix);
         }
         
-        // Move to next batch
-        const nextIz = iz + batchSize;
-        if (nextIz < gridSizeZ) {
-            // Continue this row with a slight delay to let DOM update
-            setTimeout(() => processBatch(ix, nextIz), 5); // Small delay to allow UI updates
-        } else if (ix + 1 < gridSizeX) {
-            // Move to next row
-            setTimeout(() => processBatch(ix + 1, 0), 5); // Small delay to allow UI updates
-        } else {
-            // All done, add to scene
-            this.scene.add(this.cubeInstancedMesh);
-            this.cubeInstancedMesh.instanceMatrix.needsUpdate = true;
-            console.log(`Completed creating ${cubesCreated} cubes`);
+        // Update cube count based on actual number created in this batch
+        cubesCreated += actualBatchSize;
+        
+        // Calculate progress, capping at 98% to ensure we reach 100% at the end
+        const progress = Math.min(30 + (cubesCreated / totalCubes) * 68, 98);
+        
+        // Only update UI every 5% to reduce DOM updates but still show progress
+        if (progress - lastProgressUpdate >= 5) {
+            this.updatePreloader(progress, `Creating cubes: ${cubesCreated}/${totalCubes}`);
+            lastProgressUpdate = progress;
+        }
+        
+        // Check if we're done or need to continue with next batch
+        const isLastBatch = ix >= gridSizeX - 1 && iz + batchSize >= gridSizeZ;
+        
+        // Always update the instance matrix after each batch
+        this.cubeInstancedMesh.instanceMatrix.needsUpdate = true;
+        
+        if (isLastBatch) {
+            // This is the final batch - complete the loading process
+            console.log('Final batch complete! Total cubes created:', cubesCreated);
             
-            // Create the floor grid now that cube grid is complete
-            this.createFloorGrid();
-            
-            // Update preloader when all is complete
-            this.updatePreloader(95, 'Finalizing scene...');
-            
-            // Make sure the spline is properly initialized
-            if (!this.spline) {
-                console.log('Re-creating spline as it was lost...');
-                this.createSineWaveSpline();
-                console.log('Spline re-initialized:', this.spline);
-            }
-            
-            // Ensure camera controller is set up
-            if (!this.cameraController && this.camera && this.player) {
-                console.log('Re-initializing camera controller...');
-                this.cameraController = new CameraController(this.camera, this.player);
-            }
-            
-            // Complete the loading after a longer delay to ensure everything is ready
+            // Force update to 100% and hide preloader AFTER matrix update
+            // Use a slight delay to ensure the GPU has time to process the matrix update
             setTimeout(() => {
-                console.log('Scene fully loaded and ready!');
-                this.updatePreloader(100, 'Ready!');
-            }, 2000);
+                this.updatePreloader(100, 'Complete!');
+                // Wait a bit longer before hiding the preloader
+                setTimeout(() => this.hidePreloader(), 300);
+            }, 100);
+        } else {
+            // Continue with next batch
+            let nextIx = ix;
+            let nextIz = iz + batchSize;
+            
+            if (nextIz >= gridSizeZ) {
+                nextIx++;
+                nextIz = 0;
+            }
+            
+            // Use requestAnimationFrame for better performance
+            // This ensures the current frame is rendered before processing the next batch
+            requestAnimationFrame(() => processBatch(nextIx, nextIz));
         }
     };
     
     // Start the batched processing
     console.log('Starting batch processing...');
     processBatch(0, 0);
+    
+    // Mark instance matrix as needing update
+    this.cubeInstancedMesh.instanceMatrix.needsUpdate = true;
+    
+    // Add to scene immediately
+    this.scene.add(this.cubeInstancedMesh);
     
     // Use return to exit early - the rest happens asynchronously
     return;
@@ -505,31 +554,17 @@ SceneController.prototype.createFloorGrid = function() {
     console.log('Floor grid created');
 };
 
-// Creates a simple sine wave spline for testing
-SceneController.prototype.createSineWaveSpline = function(numPoints = 40) {
-    const points = [];
-    
-    // Generate a sine wave path
-    for (let i = 0; i < numPoints; i++) {
-        const t = i / (numPoints - 1);
-        
-        // Make a curved path with sine waves
-        const x = 20 * Math.sin(t * Math.PI * 2);
-        const y = 10 + 5 * Math.sin(t * Math.PI * 4);
-        const z = -100 * t; // Go forward in Z
-        
-        points.push(new THREE.Vector3(x, y, z));
-    }
-    
-    // Create a smooth curve through the points
-    this.spline = new THREE.CatmullRomCurve3(points);
-    console.log('Created sine wave spline with', points.length, 'points');
+// This function has been removed as we're now using the OBJ spline
+// for both camera path and terrain height adjustment
+SceneController.prototype.createSineWaveSpline = function() {
+    console.log('Sine wave spline creation skipped - using OBJ spline instead');
+    return null;
 };
 
 // Hide the preloader with a fade effect
 SceneController.prototype.hidePreloader = function() {
     console.log('Hiding preloader, cube grid status:', this.cubeInstancedMesh ? 'created' : 'not created');
-    console.log('Spline status:', this.spline ? 'created' : 'not created');
+    console.log('Camera path status:', this.objCameraPath ? 'loaded from OBJ' : 'not loaded');
     
     if (!this.preloader || !this.preloader.overlay) {
         console.error('Preloader elements not available');
@@ -537,9 +572,10 @@ SceneController.prototype.hidePreloader = function() {
     }
     
     // Make sure critical components are ready before hiding preloader
-    if (!this.cubeInstancedMesh || !this.spline) {
-        console.warn('Critical components not ready, delaying preloader hide');
-        setTimeout(() => this.hidePreloader(), 1000);
+    // Only check for cube mesh since we might not have the camera path yet
+    if (!this.cubeInstancedMesh) {
+        console.warn('Cube grid not ready, delaying preloader hide');
+        setTimeout(() => this.hidePreloader(), 500);
         return;
     }
     
@@ -554,18 +590,75 @@ SceneController.prototype.hidePreloader = function() {
 
 // Set up event listeners
 SceneController.prototype.setupEventListeners = function() {
-    const self = this;
+    // Handle window resize
+    window.addEventListener('resize', this.onWindowResize.bind(this), false);
     
-    // Handle window resizing
-    window.addEventListener('resize', function() {
-        self.camera.aspect = window.innerWidth / window.innerHeight;
-        self.camera.updateProjectionMatrix();
-        self.renderer.setSize(window.innerWidth, window.innerHeight);
+    // Handle scroll events
+    window.addEventListener('scroll', (event) => {
+        // Set debug flag to log scroll position once
+        this._debugScroll = true;
     });
     
-    // Handle scrolling to move along the camera path
-    window.addEventListener('scroll', function() {
-        self.scrollY = window.scrollY;
+    // Handle key presses for camera control and debugging
+    window.addEventListener('keydown', (event) => {
+        // Debug key - press 'D' to log camera and path info
+        if (event.key === 'd' || event.key === 'D') {
+            console.log('Camera position:', this.camera.position);
+            console.log('Camera offset:', this.cameraController.offset);
+            console.log('Camera path:', this.objCameraPath || this.spline);
+            console.log('Current progress:', window.scrollY / (document.body.scrollHeight - window.innerHeight));
+        }
+        
+        // Camera offset controls
+        if (this.cameraController) {
+            const offsetStep = event.shiftKey ? 10 : 2; // Larger steps with shift key
+            
+            // X-axis controls (left/right)
+            if (event.key === 'ArrowLeft') {
+                this.cameraController.adjustOffset(-offsetStep, 0, 0);
+                event.preventDefault();
+            } else if (event.key === 'ArrowRight') {
+                this.cameraController.adjustOffset(offsetStep, 0, 0);
+                event.preventDefault();
+            }
+            
+            // Y-axis controls (up/down)
+            if (event.key === 'ArrowUp') {
+                if (event.ctrlKey) {
+                    // Ctrl+Up: Move camera forward (closer to target)
+                    this.cameraController.adjustOffset(0, 0, -offsetStep);
+                } else {
+                    // Up: Move camera higher
+                    this.cameraController.adjustOffset(0, offsetStep, 0);
+                }
+                event.preventDefault();
+            } else if (event.key === 'ArrowDown') {
+                if (event.ctrlKey) {
+                    // Ctrl+Down: Move camera backward (away from target)
+                    this.cameraController.adjustOffset(0, 0, offsetStep);
+                } else {
+                    // Down: Move camera lower
+                    this.cameraController.adjustOffset(0, -offsetStep, 0);
+                }
+                event.preventDefault();
+            }
+            
+            // Reset camera position with 'R'
+            if (event.key === 'r' || event.key === 'R') {
+                // Get current position on path
+                const scrollMax = document.body.scrollHeight - window.innerHeight;
+                const progress = Math.max(0, Math.min(window.scrollY / scrollMax, 1));
+                const pathAdapter = this.objCameraPath ? {
+                    getPointOnPath: (t) => this.objCameraPath.getPoint(t)
+                } : null;
+                
+                if (pathAdapter) {
+                    const pathPosition = pathAdapter.getPointOnPath(progress);
+                    this.cameraController.resetPosition(pathPosition);
+                }
+                event.preventDefault();
+            }
+        }
     });
 };
 
@@ -582,44 +675,52 @@ SceneController.prototype.animate = function() {
     
     // Calculate progress (0 to 1) based on scroll position
     const scrollMax = document.body.scrollHeight - window.innerHeight;
-    const progress = Math.min(this.scrollY / scrollMax, 1);
+    // Use window.pageYOffset as a fallback for older browsers
+    const currentScroll = window.scrollY || window.pageYOffset || 0;
+    const progress = Math.max(0, Math.min(currentScroll / scrollMax, 1));
     
-    // Update camera controller
-    // Priority 1: Use the loaded OBJ camera path if available
-    if (this.splineLoader && this.splineLoader.cameraPath && this.cameraController) {
-        this.cameraController.update(this.splineLoader, progress);
+    // Debug scroll position
+    if (this._debugScroll) {
+        console.log(`Scroll: ${currentScroll}/${scrollMax} = ${progress}`);
+        this._debugScroll = false; // Only log once
     }
-    // Priority 2: Use the OBJ camera path reference if available
-    else if (this.objCameraPath && this.cameraController) {
-        // Create a compatible adapter for the OBJ camera path
+    
+    // Update camera controller with proper path following
+    // Create a path adapter if needed
+    let pathAdapter = null;
+    
+    // Priority 1: Use the OBJ camera path reference if available
+    if (this.objCameraPath) {
         if (!this._objPathAdapter) {
             this._objPathAdapter = {
                 cameraPath: this.objCameraPath,
                 getPointOnPath: function(t) {
-                    return this.cameraPath.getPoint(t);
+                    return this.cameraPath.getPoint(Math.max(0, Math.min(t, 1)));
                 }
             };
         }
         // Make sure the adapter has the latest path
         this._objPathAdapter.cameraPath = this.objCameraPath;
-        // Use the adapter with the camera controller
-        this.cameraController.update(this._objPathAdapter, progress);
+        pathAdapter = this._objPathAdapter;
     }
-    // Priority 3: Fallback to the sine wave spline
-    else if (this.spline && this.cameraController) {
-        // Create a compatible adapter for the spline
-        if (!this._splineAdapter) {
-            this._splineAdapter = {
-                cameraPath: this.spline,
+    // Priority 2: Use the loaded OBJ camera path if available
+    else if (this.splineLoader && this.splineLoader.cameraPath) {
+        if (!this._splineLoaderAdapter) {
+            this._splineLoaderAdapter = {
+                cameraPath: this.splineLoader.cameraPath,
                 getPointOnPath: function(t) {
-                    return this.cameraPath.getPoint(t);
+                    return this.cameraPath.getPoint(Math.max(0, Math.min(t, 1)));
                 }
             };
         }
-        // Make sure the adapter has the latest spline
-        this._splineAdapter.cameraPath = this.spline;
-        // Use the adapter with the camera controller
-        this.cameraController.update(this._splineAdapter, progress);
+        // Make sure the adapter has the latest path
+        this._splineLoaderAdapter.cameraPath = this.splineLoader.cameraPath;
+        pathAdapter = this._splineLoaderAdapter;
+    }
+    
+    // Update camera if we have a path and controller
+    if (pathAdapter && this.cameraController) {
+        this.cameraController.update(pathAdapter, progress);
     }
 
     // --- Only update cubes if player or camera has moved ---
@@ -632,10 +733,10 @@ SceneController.prototype.animate = function() {
 
     // Animate cubes only if player or camera moved
     if ((playerMoved || cameraMoved) && this.cubeInstancedMesh && this.quadTree) {
-        // Much simpler animation approach
+        // More optimized animation approach with reasonable radius
         const effectCenter = player;
-        const effectRadius = 50;
-        const queryRadius = 100; // Slightly larger search radius
+        const effectRadius = 80; // Reduced radius for better performance
+        const queryRadius = 100; // Smaller search radius to reduce lag
         const dummy = new THREE.Object3D();
         
         // Use quadtree for fast spatial query - only process cubes that could be affected
@@ -645,27 +746,60 @@ SceneController.prototype.animate = function() {
             radius: queryRadius
         });
         
-        console.log(`Processing ${nearbyCubes.length} cubes out of ${Object.keys(this.cubeGridPositions).length} total`); 
+        // Only log occasionally to reduce console overhead
+        if (Math.random() < 0.01) {
+            console.log(`Processing ${nearbyCubes.length} cubes out of ${Object.keys(this.cubeGridPositions).length} total`);
+        }
         
         // Set to keep track of the indices we've processed this frame
         const processed = new Set();
         
         // Process nearby cubes
         for (const cube of nearbyCubes) {
-            // Fast distance calculation
+            // Fast distance calculation - use squared distance where possible to avoid sqrt
             const dx = cube.x - effectCenter.x;
             const dz = cube.z - effectCenter.z;
-            const dist = Math.sqrt(dx*dx + dz*dz);
+            const distSq = dx*dx + dz*dz;
+            
+            // Only calculate actual distance when needed
+            const dist = Math.sqrt(distSq);
             
             processed.add(cube.i);
             
-            // Simple Gaussian falloff - no complex blending needed
+            // Massively wide falloff that spans the entire visible area
             if (dist < effectRadius) {
-                const falloff = Math.exp(-0.01 * dist * dist);
-                const raise = falloff * 8 * 0.5; // 50% height reduction
+                // Use a much gentler falloff for smoother, less intense camera effect
+                const falloff = 1 / (1 + 0.00002 * dist * dist); // Gentler falloff for smoother effect
                 
-                // Apply the height effect
-                dummy.position.set(cube.x, cube.baseY + raise, cube.z);
+                // Apply double smoothstep for extremely smooth transitions
+                let smoothFalloff = falloff * falloff * (3 - 2 * falloff);
+                // Apply second smoothstep for even smoother result
+                smoothFalloff = smoothFalloff * smoothFalloff * (3 - 2 * smoothFalloff);
+                
+                // Calculate maximum height raise with reduced intensity
+                const maxRaise = 8; // Reduced from 15 for less intense effect
+                const raise = smoothFalloff * maxRaise;
+                
+                // Get current path position to ensure we don't exceed spline height
+                // Cache the spline height calculation to avoid redundant calculations
+                if (!this._cachedSplineHeight || this._lastProgressCheck !== window.scrollY) {
+                    const scrollMax = document.body.scrollHeight - window.innerHeight;
+                    const progress = Math.max(0, Math.min(window.scrollY / scrollMax, 1));
+                    
+                    if (this.objCameraPath) {
+                        const pathPt = this.objCameraPath.getPoint(progress);
+                        this._cachedSplineHeight = pathPt.y;
+                        this._lastProgressCheck = window.scrollY;
+                    } else {
+                        this._cachedSplineHeight = 0;
+                    }
+                }
+                
+                const splineHeight = this._cachedSplineHeight;
+                
+                // Apply the height effect but ensure it doesn't exceed spline height
+                const playerHeight = Math.min(cube.baseY + raise, splineHeight - 1);
+                dummy.position.set(cube.x, playerHeight, cube.z);
                 dummy.updateMatrix();
                 this.cubeInstancedMesh.setMatrixAt(cube.i, dummy.matrix);
             } else {
@@ -678,9 +812,10 @@ SceneController.prototype.animate = function() {
         
         // If this is the first frame or a major camera movement, ensure ALL cubes are visible
         // This is essential for showing the entire grid properly
+        // Only do this for very significant movements to reduce performance impact
         if (!this._initializedGrid || 
-            Math.abs(camera.x - this._lastCameraPos.x) > 50 || 
-            Math.abs(camera.z - this._lastCameraPos.z) > 50) {
+            Math.abs(camera.x - this._lastCameraPos.x) > 100 || 
+            Math.abs(camera.z - this._lastCameraPos.z) > 100) {
             
             for (const key in this.cubeGridPositions) {
                 const cube = this.cubeGridPositions[key];
