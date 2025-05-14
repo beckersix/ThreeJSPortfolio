@@ -12,7 +12,9 @@ This project is a portfolio website that uses Three.js for frontend visualizatio
 
 1. Clone this repository
 
-
+```
+   git clone https://github.com/your-username/ThreeJSPortfolio.git
+```
 
 2. Create ENV
  ```
