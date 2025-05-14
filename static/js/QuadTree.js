@@ -4,11 +4,12 @@
  */
 
 class QuadTree {
-    constructor(boundary, capacity = 8) {
+    constructor(boundary, capacity = 8, depth = 0) {
         this.boundary = boundary; // {x, z, width, height}
         this.capacity = capacity; // Max items before subdivision
         this.items = [];          // Generic items (can be cubes or effectors)
         this.divided = false;
+        this.depth = depth;       // Track the depth of this node for visualization
         this.northEast = null;
         this.northWest = null;
         this.southEast = null;
@@ -21,11 +22,12 @@ class QuadTree {
         const z = this.boundary.z;
         const w = this.boundary.width / 2;
         const h = this.boundary.height / 2;
+        const nextDepth = this.depth + 1;
 
-        this.northEast = new QuadTree({x: x + w, z: z - h, width: w, height: h}, this.capacity);
-        this.northWest = new QuadTree({x: x - w, z: z - h, width: w, height: h}, this.capacity);
-        this.southEast = new QuadTree({x: x + w, z: z + h, width: w, height: h}, this.capacity);
-        this.southWest = new QuadTree({x: x - w, z: z + h, width: w, height: h}, this.capacity);
+        this.northEast = new QuadTree({x: x + w, z: z - h, width: w, height: h}, this.capacity, nextDepth);
+        this.northWest = new QuadTree({x: x - w, z: z - h, width: w, height: h}, this.capacity, nextDepth);
+        this.southEast = new QuadTree({x: x + w, z: z + h, width: w, height: h}, this.capacity, nextDepth);
+        this.southWest = new QuadTree({x: x - w, z: z + h, width: w, height: h}, this.capacity, nextDepth);
 
         this.divided = true;
 
@@ -49,6 +51,10 @@ class QuadTree {
 
         // If there's space, add the item here
         if (this.items.length < this.capacity && !this.divided) {
+            // Store the quadtree depth on the item for visualization
+            if (item.key) { // It's a cube with a key
+                item.quadTreeDepth = this.depth;
+            }
             this.items.push(item);
             return true;
         }

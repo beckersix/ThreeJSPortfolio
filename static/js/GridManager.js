@@ -9,6 +9,8 @@ class GridManager {
         
         // Configure grid options with defaults
         this.config = Object.assign({
+            // Visualization options
+            showQuadTreeDepth: false,   // Whether to color cubes based on quadtree depth
             // Grid dimensions
             gridSizeX: 100,     // Reduced from 350 for better performance
             gridSizeZ: 500,     // Reduced from 500 for better performance
@@ -77,7 +79,15 @@ class GridManager {
             height: halfZ + 100  // Add margin
         };
         
-        this.quadTree = new QuadTree(boundary, 8);
+        // Use lodFactor to control quadtree capacity - higher factor means less subdivisions
+        // This directly affects how the LOD system works
+        const capacity = Math.max(4, Math.round(8 * this.config.lodFactor)); 
+        this.quadTree = new QuadTree(boundary, capacity);
+        
+        // Update visualization if enabled
+        if (this.config.showQuadTreeDepth && this.instanceColors) {
+            this.colorCubesByQuadTreeDepth();
+        }
     }
     
     // Create the instanced mesh for all cubes
@@ -97,7 +107,8 @@ class GridManager {
                 color: this.config.cubeColor,
                 roughness: 0.0,         // No roughness for perfect reflections
                 metalness: 1.0,         // Full metalness for maximum reflections
-                envMapIntensity: 1.0    // Default environment map intensity
+                envMapIntensity: 1.0,   // Default environment map intensity
+                vertexColors: true      // Enable vertex colors for visualization
             });
             
             // The UltraHDR example uses a simple MeshStandardMaterial with
@@ -111,6 +122,19 @@ class GridManager {
             this.instancedMesh = new THREE.InstancedMesh(cubeGeo, cubeMat, totalCubes);
             this.instancedMesh.castShadow = true;
             this.instancedMesh.receiveShadow = true;
+            
+            // Create color buffer for visualization
+            this.instanceColors = new THREE.InstancedBufferAttribute(
+                new Float32Array(totalCubes * 3), 3
+            );
+            
+            // Set default color (white) for all instances
+            for (let i = 0; i < totalCubes; i++) {
+                this.instanceColors.setXYZ(i, 1, 1, 1);
+            }
+            
+            this.instancedMesh.geometry.setAttribute('color', this.instanceColors);
+            this.instanceColors.needsUpdate = true;
             
             // Add to scene
             this.scene.add(this.instancedMesh);
@@ -556,9 +580,9 @@ class GridManager {
             }
         }
         
-        // Define the maximum distance for cube updates
+        // Use the culling distance from config for update distance
         // This is the key optimization - we only process cubes within this distance
-        const maxUpdateDistance = 120; // Units in world space
+        const maxUpdateDistance = this.config.cullingDistance || 120; // Units in world space
         const maxUpdateDistanceSq = maxUpdateDistance * maxUpdateDistance; // Square for faster comparison
         
         // Find cubes that need to be processed
@@ -595,8 +619,16 @@ class GridManager {
                 radius: maxUpdateDistance
             });
             
+            // Process only up to maxCubesPerFrame (limit from config)
+            // Get the max number of cubes to process from config
+            const maxCubes = this.config.maxCubesPerFrame || 1000;
+            
+            // Only process up to the maximum number of cubes without expensive sorting
+            // This is much more efficient than sorting every frame
+            const cubesToAdd = maxCubes >= nearbyCubes.length ? nearbyCubes : nearbyCubes.slice(0, maxCubes);
+            
             // Add these cubes to the processing set
-            nearbyCubes.forEach(cube => cubesToProcess.add(cube.key));
+            cubesToAdd.forEach(cube => cubesToProcess.add(cube.key));
             
             // Now add additional cubes that are near active effectors (within their radius)
             for (const effector of this.effectors) {
@@ -774,6 +806,56 @@ class GridManager {
             cube.scale = maxScale;
         }
         
+        // Only reset cubes outside the culling radius if reset is enabled and not too often
+        // This is a heavy operation, so we only do it every 10 frames to improve performance
+        if (playerPosition && cubesToProcess.size > 0 && this._frameCounter % 10 === 0) {
+            // Use a more efficient approach - only update cubes that are actually outside their rest state
+            const resetDummy = new THREE.Object3D();
+            const resetLimit = 100; // Limit how many we reset per frame for better performance
+            let resetCount = 0;
+            
+            // Create a Set of all cube keys - only once
+            if (!this._outsideCubes) {
+                this._outsideCubes = new Set(Object.keys(this.cubes));
+            }
+            
+            // Remove the keys that will be processed (within culling radius)
+            for (const key of cubesToProcess) {
+                this._outsideCubes.delete(key);
+            }
+            
+            // Process a subset of outside cubes each frame
+            const outsideArray = Array.from(this._outsideCubes);
+            const startIndex = (this._frameCounter / 10) % outsideArray.length;
+            
+            for (let i = 0; i < resetLimit && i < outsideArray.length; i++) {
+                const index = (startIndex + i) % outsideArray.length;
+                const key = outsideArray[index];
+                const cube = this.cubes[key];
+                
+                if (!cube) continue;
+                if (cube.y === cube.baseY && cube.scale === this.config.initialScale) continue;
+                
+                // Reset to initial position and scale
+                resetDummy.position.set(cube.x, cube.baseY, cube.z);
+                resetDummy.scale.set(this.config.initialScale, this.config.initialScale, this.config.initialScale);
+                resetDummy.updateMatrix();
+                
+                // Update instance matrix
+                this.instancedMesh.setMatrixAt(cube.i, resetDummy.matrix);
+                
+                // Update cube data
+                cube.y = cube.baseY;
+                cube.scale = this.config.initialScale;
+                resetCount++;
+            }
+            
+            // Only flag update if we actually changed anything
+            if (resetCount > 0) {
+                this.instancedMesh.instanceMatrix.needsUpdate = true;
+            }
+        }
+        
         // Mark instance matrix as needing update if any cubes were processed
         if (cubesToProcess.size > 0) {
             this.instancedMesh.instanceMatrix.needsUpdate = true;
@@ -818,6 +900,145 @@ class GridManager {
         if (amplitude !== undefined) this.noiseAmplitude = amplitude;
         if (scale !== undefined) this.noiseScale = scale;
         if (speed !== undefined) this.noiseSpeed = speed;
+    }
+    
+    // Toggle quadtree depth visualization
+    toggleQuadTreeVisualization(enabled) {
+        this.config.showQuadTreeDepth = enabled;
+        
+        // First, make sure material settings are correct
+        this.instancedMesh.material.vertexColors = true;
+        this.instancedMesh.material.needsUpdate = true;
+        
+        if (enabled) {
+            // Apply the visualization
+            this.colorCubesByQuadTreeDepth();
+            console.log('QuadTree visualization enabled');
+        } else {
+            // Reset all cubes to default color
+            const defaultColor = new THREE.Color(this.config.cubeColor);
+            for (let i = 0; i < this.instanceColors.count; i++) {
+                this.instanceColors.setXYZ(i, defaultColor.r, defaultColor.g, defaultColor.b);
+            }
+            this.instanceColors.needsUpdate = true;
+            console.log('QuadTree visualization disabled');
+        }
+    }
+    
+    // Color cubes based on their quadtree depth
+    colorCubesByQuadTreeDepth() {
+        if (!this.instancedMesh || !this.quadTree || !this.config.showQuadTreeDepth) {
+            console.log('Cannot visualize quadtree: missing requirements');
+            return;
+        }
+        
+        console.log('Applying quadtree depth visualization...');
+        
+        // Rebuild the quadtree to update depth information
+        console.log('Rebuilding quadtree to refresh depth information...');
+        this.quadTree.clear();
+        for (const key in this.cubes) {
+            this.quadTree.insert(this.cubes[key]);
+        }
+        
+        // Find the maximum depth in the quadtree
+        let maxDepth = 0;
+        for (const key in this.cubes) {
+            const depth = this.cubes[key].quadTreeDepth || 0;
+            maxDepth = Math.max(maxDepth, depth);
+        }
+        console.log(`Max quadtree depth: ${maxDepth}`);
+        
+        // Define colors for different depths (rainbow spectrum)
+        const depthColors = [
+            new THREE.Color(1.0, 0.0, 0.0), // Red (depth 0)
+            new THREE.Color(1.0, 0.5, 0.0), // Orange
+            new THREE.Color(1.0, 1.0, 0.0), // Yellow
+            new THREE.Color(0.0, 1.0, 0.0), // Green
+            new THREE.Color(0.0, 0.0, 1.0), // Blue
+            new THREE.Color(0.5, 0.0, 0.5), // Purple
+            new THREE.Color(0.8, 0.0, 0.8)  // Violet
+        ];
+        
+        const depthCounts = new Array(maxDepth + 1).fill(0);
+        
+        // Update color for each cube based on its quadtree depth
+        for (const key in this.cubes) {
+            const cube = this.cubes[key];
+            const depth = cube.quadTreeDepth || 0;
+            depthCounts[depth]++;
+            
+            // Normalize depth to get color index
+            let colorIndex = Math.min(Math.floor(depth * (depthColors.length / (maxDepth || 1))), depthColors.length - 1);
+            if (maxDepth === 0) colorIndex = 0; // All red if no depth
+            
+            const color = depthColors[colorIndex];
+            
+            // Set color in instance buffer - use direct RGB values
+            this.instanceColors.setXYZ(cube.i, color.r, color.g, color.b);
+        }
+        
+        // Debug output
+        console.log('Depth distribution:', depthCounts);
+        console.log(`Colored ${Object.keys(this.cubes).length} cubes by quadtree depth`);
+        
+        // Update the buffer
+        this.instanceColors.needsUpdate = true;
+        
+        // Make sure material settings are correct
+        this.instancedMesh.material.vertexColors = true;
+        this.instancedMesh.material.needsUpdate = true;
+    }
+    
+    // Override any base material color with a standard one
+    resetCubeColors() {
+        if (!this.instancedMesh || !this.instanceColors) return;
+        
+        const defaultColor = new THREE.Color(this.config.cubeColor);
+        for (let i = 0; i < this.instanceColors.count; i++) {
+            this.instanceColors.setXYZ(i, defaultColor.r, defaultColor.g, defaultColor.b);
+        }
+        this.instanceColors.needsUpdate = true;
+        this.instancedMesh.material.needsUpdate = true;
+        console.log('Reset all cube colors to default');
+    }
+    
+    // Test function - apply a direct pattern of colors for testing
+    testColorVisualization() {
+        if (!this.instancedMesh || !this.instanceColors) return;
+        
+        console.log('Testing cube color visualization...');
+        
+        // First ensure the material is correctly set up
+        this.instancedMesh.material.vertexColors = true;
+        this.instancedMesh.material.needsUpdate = true;
+        
+        // Sample color scale
+        const colors = [
+            new THREE.Color(1.0, 0.0, 0.0), // Red
+            new THREE.Color(0.0, 1.0, 0.0), // Green
+            new THREE.Color(0.0, 0.0, 1.0), // Blue
+            new THREE.Color(1.0, 1.0, 0.0), // Yellow
+        ];
+        
+        // Apply a simple pattern (alternating colors based on position)
+        for (const key in this.cubes) {
+            const cube = this.cubes[key];
+            const xPos = Math.floor(cube.x); 
+            const zPos = Math.floor(cube.z);
+            
+            // Use alternating pattern based on position
+            const colorIndex = (Math.abs(xPos) + Math.abs(zPos)) % colors.length;
+            const color = colors[colorIndex];
+            
+            // Apply color
+            this.instanceColors.setXYZ(cube.i, color.r, color.g, color.b);
+        }
+        
+        // Update the buffer
+        this.instanceColors.needsUpdate = true;
+        this.instancedMesh.material.needsUpdate = true;
+        console.log('Test pattern applied');
     }
     
     // Dispose and clean up resources

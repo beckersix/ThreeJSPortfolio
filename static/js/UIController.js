@@ -41,6 +41,7 @@ function UIController(sceneController, cameraController, gridManager) {
     this.container.style.zIndex = '10000';
     this.container.style.maxHeight = '80vh';
     this.container.style.overflowY = 'auto';
+    this.container.style.overflowX = 'hidden';
     this.container.style.pointerEvents = 'auto';
     
     // Add minimize/maximize button
@@ -76,6 +77,7 @@ function UIController(sceneController, cameraController, gridManager) {
 
 UIController.prototype.initUI = function() {
     // Create sections
+    this.createGeneralControls();
     this.createCameraControls();
     this.createGridControls();
     this.createPerformanceControls();
@@ -94,15 +96,41 @@ UIController.prototype.setupEventListeners = function() {
 
 UIController.prototype.toggleMinimize = function() {
     if (this.isMinimized) {
+        // Restore content
         this.content.style.display = 'block';
         this.minimizeButton.textContent = '−';
-        this.container.style.width = '300px';
+        this.container.style.height = 'auto';
     } else {
+        // Collapse but keep width
         this.content.style.display = 'none';
         this.minimizeButton.textContent = '+';
-        this.container.style.width = '30px';
+        this.container.style.height = '15px';
     }
     this.isMinimized = !this.isMinimized;
+};
+
+UIController.prototype.createGeneralControls = function() {
+    const section = this.createSection('General Controls');
+    const self = this;
+    
+    // FPS limiter
+    this.createSlider(section, 'FPS Limit', 30, 120, 60, 5, function(value) {
+        // Implement FPS limiting if needed
+        console.log('FPS limit set to:', value);
+    });
+    
+    // Fullscreen toggle
+    this.createButton(section, 'Toggle Fullscreen', function() {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(err => {
+                console.error(`Error attempting to enable fullscreen: ${err.message}`);
+            });
+        } else {
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            }
+        }
+    });
 };
 
 UIController.prototype.createSection = function(title) {
@@ -300,15 +328,15 @@ UIController.prototype.createGridControls = function() {
     const self = this;
     
     // Noise controls
-    this.createSlider(section, 'Noise Amplitude', 0, 2, this.gridManager.noiseAmplitude, 0.1, function(value) {
+    this.createSlider(section, 'Noise Amplitude', 2.1, 20, this.gridManager.noiseAmplitude, 0.1, function(value) {
         self.gridManager.setNoiseParameters(value, undefined, undefined);
     });
     
-    this.createSlider(section, 'Noise Scale', 0.01, 0.1, this.gridManager.noiseScale, 0.01, function(value) {
+    this.createSlider(section, 'Noise Scale', 0.01, 1.0, this.gridManager.noiseScale, 0.01, function(value) {
         self.gridManager.setNoiseParameters(undefined, value, undefined);
     });
     
-    this.createSlider(section, 'Noise Speed', 0.1, 1, this.gridManager.noiseSpeed, 0.1, function(value) {
+    this.createSlider(section, 'Noise Speed', 0.8, 10, this.gridManager.noiseSpeed, 0.1, function(value) {
         self.gridManager.setNoiseParameters(undefined, undefined, value);
     });
     
@@ -316,11 +344,11 @@ UIController.prototype.createGridControls = function() {
     if (this.gridManager.effectors && this.gridManager.effectors.length > 0) {
         const playerEffector = this.gridManager.effectors.find(e => e.id === 'player');
         if (playerEffector) {
-            this.createSlider(section, 'Player Radius', 50, 200, playerEffector.radius, 10, function(value) {
+            this.createSlider(section, 'Player Radius', 50, 200, playerEffector.radius, 1, function(value) {
                 playerEffector.radius = value;
             });
             
-            this.createSlider(section, 'Max Raise', 5, 30, playerEffector.maxRaise, 1, function(value) {
+            this.createSlider(section, 'Max Raise', -30, 30, playerEffector.maxRaise, 1, function(value) {
                 playerEffector.maxRaise = value;
             });
         }
@@ -341,48 +369,92 @@ UIController.prototype.createPerformanceControls = function() {
     const section = this.createSection('Performance Controls');
     const self = this;
     
-    // Culling distance
-    this.createSlider(section, 'Culling Distance', 50, 500, this.gridManager.config.cullingDistance, 50, function(value) {
+    // Culling distance slider
+    this.createSlider(section, 'Culling Distance', 50, 200, this.gridManager.config.cullingDistance, 5, function(value) {
         self.gridManager.config.cullingDistance = value;
     });
     
-    // Max cubes per frame
-    this.createSlider(section, 'Max Cubes/Frame', 100, 10000, this.gridManager.config.maxCubesPerFrame, 1000, function(value) {
+    // Maximum cubes per frame slider
+    this.createSlider(section, 'Max Cubes Per Frame', 500, 5000, this.gridManager.config.maxCubesPerFrame, 100, function(value) {
         self.gridManager.config.maxCubesPerFrame = value;
     });
     
-    // Update interval
-    this.createSlider(section, 'Update Interval', 1, 25, this.gridManager.config.updateInterval, 1, function(value) {
-        self.gridManager.config.updateInterval = Math.round(value);
+    // Update interval slider
+    this.createSlider(section, 'Update Interval', 1, 10, this.gridManager.config.updateInterval, 1, function(value) {
+        self.gridManager.config.updateInterval = value;
     });
     
-    // Quality presets
-    const qualityOptions = [
-        { value: 'low', label: 'Low Quality' },
-        { value: 'medium', label: 'Medium Quality' },
-        { value: 'high', label: 'High Quality' }
-    ];
-    
-    this.createDropdown(section, 'Quality Preset', qualityOptions, function(value) {
-        switch (value) {
-            case 'low':
-                self.gridManager.config.cullingDistance = 100;
-                self.gridManager.config.maxCubesPerFrame = 2000;
-                self.gridManager.config.updateInterval = 3;
-                break;
-            case 'medium':
-                self.gridManager.config.cullingDistance = 200;
-                self.gridManager.config.maxCubesPerFrame = 5000;
-                self.gridManager.config.updateInterval = 2;
-                break;
-            case 'high':
-                self.gridManager.config.cullingDistance = 300;
-                self.gridManager.config.maxCubesPerFrame = 8000;
-                self.gridManager.config.updateInterval = 1;
-                break;
+    // Add a slider for LOD factor
+    this.createSlider(section, 'LOD Factor', 1, 10, this.gridManager.config.lodFactor || 1, 0.5, function(value) {
+        // Store the new value
+        self.gridManager.config.lodFactor = value;
+        
+        // Schedule quadtree reinitialization for the next frame
+        // This avoids freezing if user is actively dragging the slider
+        if (!self._lodUpdateScheduled) {
+            self._lodUpdateScheduled = true;
+            requestAnimationFrame(function() {
+                self.gridManager.initQuadTree();
+                self._lodUpdateScheduled = false;
+            });
         }
-        self.updateUIValues();
     });
+    
+    // Add a visualization toggle for quadtree depth
+    this.createCheckbox(section, 'Show QuadTree Depth', this.gridManager.config.showQuadTreeDepth, function(checked) {
+        self.gridManager.toggleQuadTreeVisualization(checked);
+    });
+    
+    // Add a button to test color visualization directly
+    this.createButton(section, 'Test Colors', function() {
+        self.gridManager.testColorVisualization();
+    });
+    
+    // Create a stats container for grid statistics
+    const statsContainer = document.createElement('div');
+    statsContainer.style.marginTop = '10px';
+    statsContainer.style.fontSize = '12px';
+    section.appendChild(statsContainer);
+    
+    // Create labels for statistics
+    this.gridStatsLabels = {
+        fps: document.createElement('div'),
+        cubes: document.createElement('div'),
+        effectors: document.createElement('div')
+    };
+    
+    this.gridStatsLabels.fps.textContent = 'FPS: --';
+    this.gridStatsLabels.cubes.textContent = 'Cubes: ' + this.gridManager.getCubeCount();
+    this.gridStatsLabels.effectors.textContent = 'Effectors: ' + this.gridManager.getEffectorCount();
+    
+    statsContainer.appendChild(this.gridStatsLabels.fps);
+    statsContainer.appendChild(this.gridStatsLabels.cubes);
+    statsContainer.appendChild(this.gridStatsLabels.effectors);
+    
+    // Set up FPS counter
+    let lastTime = performance.now();
+    let frames = 0;
+    let fps = 0;
+    
+    const updateFps = () => {
+        const now = performance.now();
+        frames++;
+        
+        if (now > lastTime + 1000) {
+            fps = Math.round(frames * 1000 / (now - lastTime));
+            this.gridStatsLabels.fps.textContent = 'FPS: ' + fps;
+            frames = 0;
+            lastTime = now;
+            
+            // Update other stats too
+            this.gridStatsLabels.cubes.textContent = 'Cubes: ' + this.gridManager.getCubeCount();
+            this.gridStatsLabels.effectors.textContent = 'Effectors: ' + this.gridManager.getEffectorCount();
+        }
+        
+        requestAnimationFrame(updateFps);
+    };
+    
+    updateFps();
     
     // Stats toggle
     this.createCheckbox(section, 'Show Performance Stats', false, function(checked) {

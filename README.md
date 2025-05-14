@@ -11,11 +11,21 @@ This project is a portfolio website that uses Three.js for frontend visualizatio
 ## Installation
 
 1. Clone this repository
-2. Install the required packages:
+
+
+
+2. Create ENV
+ ```
+   python -m venv venv
+   source venv/bin/activate
+ ```
+
+3. Install the required packages:
    ```
    pip install -r requirements.txt
    ```
-3. Run the Django development server:
+
+4. Run the Django development server:
    ```
    python manage.py runserver
    ```

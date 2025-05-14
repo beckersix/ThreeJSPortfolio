@@ -140,9 +140,9 @@ function setupControls(sceneControllerInstance) {
             }
         },
         grid: {
-            noiseAmplitude: gridManager ? gridManager.noiseAmplitude || 0.5 : 0.5,
-            noiseScale: gridManager ? gridManager.noiseScale || 0.02 : 0.02,
-            noiseSpeed: gridManager ? gridManager.noiseSpeed || 0.2 : 0.2
+            noiseAmplitude: gridManager ? gridManager.noiseAmplitude || 2.5 : 2.5,
+            noiseScale: gridManager ? gridManager.noiseScale || 0.1 : 0.1,
+            noiseSpeed: gridManager ? gridManager.noiseSpeed || 0.8 : 0.8
         },
         performance: {
             cullingDistance: gridManager && gridManager.config ? (gridManager.config.cullingDistance || 100) : 100,
